@@ -71,20 +71,24 @@ export default async function handler(req, res) {
     
     // Handle path reconstruction
     // Vercel routes /api/* to this function, but Express expects paths without /api
+    // If called from catch-all handler, path is already set correctly
+    // Otherwise, we need to reconstruct it
     let path = req.url || req.path || '/';
     
-    // If path starts with /api, strip it
+    // If path starts with /api, strip it (direct call to index.js)
     if (path.startsWith('/api')) {
       path = path.replace(/^\/api/, '') || '/';
+      console.log(`[API] Stripped /api prefix, new path: ${path}`);
     }
     
-    // If we have query.path (from catch-all), use that instead
-    if (req.query && req.query.path) {
+    // If we have query.path (from catch-all that didn't set it), use that
+    // But catch-all should have already set req.url, so this is a fallback
+    if (req.query && req.query.path && (path === '/' || path === '')) {
       const pathSegments = Array.isArray(req.query.path) 
         ? req.query.path 
         : [req.query.path];
       path = '/' + pathSegments.join('/');
-      console.log(`[API] Reconstructed path from query: ${path}`);
+      console.log(`[API] Reconstructed path from query (fallback): ${path}`);
     }
     
     // Update all path-related properties
@@ -94,7 +98,7 @@ export default async function handler(req, res) {
       req.originalUrl = '/api' + path;
     }
     
-    console.log(`[API] Final path: ${path}`);
+    console.log(`[API] Final path for Express: ${path}`);
     console.log(`[API] Request method: ${req.method}`);
     console.log(`[API] Request headers:`, JSON.stringify(req.headers, null, 2));
     
