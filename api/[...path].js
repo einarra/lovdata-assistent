@@ -5,20 +5,26 @@ import handler from './index.js';
 
 // Export handler that reconstructs the path from Vercel's path parameter
 export default async function catchAllHandler(req, res) {
+  // Log all request properties for debugging
+  console.log(`[Catch-all] ===== Request Details =====`);
+  console.log(`[Catch-all] Method: ${req.method}`);
+  console.log(`[Catch-all] URL: ${req.url}`);
+  console.log(`[Catch-all] Path: ${req.path}`);
+  console.log(`[Catch-all] Original URL: ${req.originalUrl}`);
+  console.log(`[Catch-all] Query object:`, req.query);
+  console.log(`[Catch-all] Query keys:`, Object.keys(req.query || {}));
+  
   // Vercel provides path segments in req.query.path as an array
   // For /api/health, req.query.path = ['health']
   // For /api/assistant/run, req.query.path = ['assistant', 'run']
   const pathSegments = req.query.path || [];
+  console.log(`[Catch-all] Path segments (raw):`, pathSegments);
+  console.log(`[Catch-all] Path segments type:`, typeof pathSegments, Array.isArray(pathSegments));
+  
   const path = Array.isArray(pathSegments) 
     ? '/' + pathSegments.join('/')
     : '/' + String(pathSegments);
   
-  // Log for debugging
-  console.log(`[Catch-all] Method: ${req.method}`);
-  console.log(`[Catch-all] Original URL: ${req.url}`);
-  console.log(`[Catch-all] Original path: ${req.path}`);
-  console.log(`[Catch-all] Query:`, JSON.stringify(req.query));
-  console.log(`[Catch-all] Path segments:`, pathSegments);
   console.log(`[Catch-all] Reconstructed path: ${path}`);
   
   // Set the reconstructed path on the request
