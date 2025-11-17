@@ -14,16 +14,23 @@ export default async function catchAllHandler(req, res) {
   console.log(`[Catch-all] Query object:`, req.query);
   console.log(`[Catch-all] Query keys:`, Object.keys(req.query || {}));
   
-  // Vercel provides path segments in req.query.path as an array
-  // For /api/health, req.query.path = ['health']
-  // For /api/assistant/run, req.query.path = ['assistant', 'run']
-  const pathSegments = req.query.path || [];
-  console.log(`[Catch-all] Path segments (raw):`, pathSegments);
-  console.log(`[Catch-all] Path segments type:`, typeof pathSegments, Array.isArray(pathSegments));
+  // Vercel provides path segments in req.query['...path'] (with three dots) for catch-all routes
+  // For /api/health, req.query['...path'] = 'health'
+  // For /api/assistant/run, req.query['...path'] = 'assistant/run' (or array ['assistant', 'run'])
+  const pathParam = req.query['...path'] || req.query.path || '';
+  console.log(`[Catch-all] Path param (raw):`, pathParam);
+  console.log(`[Catch-all] Path param type:`, typeof pathParam, Array.isArray(pathParam));
   
-  const path = Array.isArray(pathSegments) 
-    ? '/' + pathSegments.join('/')
-    : '/' + String(pathSegments);
+  // Handle both string and array formats
+  let path: string;
+  if (Array.isArray(pathParam)) {
+    path = '/' + pathParam.join('/');
+  } else if (typeof pathParam === 'string') {
+    // If it's a string, it might already be the full path or just segments
+    path = pathParam.startsWith('/') ? pathParam : '/' + pathParam;
+  } else {
+    path = '/';
+  }
   
   console.log(`[Catch-all] Reconstructed path: ${path}`);
   
@@ -33,8 +40,9 @@ export default async function catchAllHandler(req, res) {
   req.path = path;
   req.originalUrl = req.originalUrl || '/api' + path;
   
-  // Also set query.path to undefined so the main handler doesn't try to use it again
+  // Also clean up query params so the main handler doesn't try to use them
   if (req.query) {
+    delete req.query['...path'];
     delete req.query.path;
   }
   
