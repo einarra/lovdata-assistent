@@ -172,7 +172,37 @@ export default async function handler(req, res) {
         req.params = {};
       }
       
+      // Express expects certain properties on the request
+      // Ensure they're set correctly
+      req.method = req.method || 'GET';
+      req.url = req.url || path;
+      req.path = req.path || path;
+      req.originalUrl = req.originalUrl || '/api' + path;
+      req.baseUrl = req.baseUrl || '';
+      req.protocol = req.protocol || 'https';
+      req.hostname = req.hostname || req.headers.host || 'localhost';
+      req.ip = req.ip || req.headers['x-forwarded-for'] || '127.0.0.1';
+      
       console.log(`[API] About to call app(), req properties: method=${req.method}, url=${req.url}, path=${req.path}`);
+      console.log(`[API] Express app type: ${typeof app}, is function: ${typeof app === 'function'}`);
+      
+      // Set up response tracking before calling Express
+      let expressProcessed = false;
+      const checkExpressResponse = setInterval(() => {
+        if (res.headersSent && !expressProcessed) {
+          expressProcessed = true;
+          clearInterval(checkExpressResponse);
+          console.log(`[API] Express sent response! headersSent: ${res.headersSent}`);
+        }
+      }, 10);
+      
+      // Clear interval after timeout
+      setTimeout(() => {
+        clearInterval(checkExpressResponse);
+        if (!expressProcessed && !res.headersSent) {
+          console.error(`[API] Express did not process request after 1 second`);
+        }
+      }, 1000);
       
       try {
         const result = app(req, res, (err) => {
