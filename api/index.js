@@ -233,6 +233,19 @@ export default async function handler(req, res) {
       console.log(`[API] About to call app(), req properties: method=${req.method}, url=${req.url}, path=${req.path}`);
       console.log(`[API] Express app type: ${typeof app}, is function: ${typeof app === 'function'}`);
       
+      // Log all registered routes for debugging
+      if (app._router && app._router.stack) {
+        const registeredRoutes = [];
+        app._router.stack.forEach((middleware) => {
+          if (middleware.route) {
+            const methods = Object.keys(middleware.route.methods).join(',').toUpperCase();
+            registeredRoutes.push(`${methods} ${middleware.route.path}`);
+          }
+        });
+        console.log(`[API] Registered Express routes:`, registeredRoutes);
+        console.log(`[API] Looking for route: ${req.method} ${req.url}`);
+      }
+      
       // Set up response tracking before calling Express
       let expressProcessed = false;
       const checkExpressResponse = setInterval(() => {
