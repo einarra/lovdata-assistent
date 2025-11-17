@@ -92,7 +92,18 @@ class ApiService {
   async healthCheck(): Promise<HealthResponse> {
     const response = await fetch(`${this.baseUrl}/health`);
     if (!response.ok) {
-      throw new Error(`Health check failed: ${response.statusText}`);
+      let errorMessage = `Health check failed: ${response.statusText}`;
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.message || errorData.detail || errorMessage;
+      } catch {
+        // If response is not JSON, try to get text
+        const text = await response.text().catch(() => '');
+        if (text && !text.startsWith('<!')) {
+          errorMessage = text;
+        }
+      }
+      throw new Error(errorMessage);
     }
     return response.json();
   }
@@ -107,8 +118,18 @@ class ApiService {
     });
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: response.statusText }));
-      throw new Error(error.detail || `Skill run failed: ${response.statusText}`);
+      let errorMessage = `Skill run failed: ${response.statusText}`;
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.message || errorData.detail || errorMessage;
+      } catch {
+        // If response is not JSON, use status text
+        const text = await response.text().catch(() => '');
+        if (text && !text.startsWith('<!')) {
+          errorMessage = text;
+        }
+      }
+      throw new Error(errorMessage);
     }
 
     return response.json();
@@ -125,8 +146,18 @@ class ApiService {
     });
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: response.statusText }));
-      throw new Error(error.detail || `Assistant run failed: ${response.statusText}`);
+      let errorMessage = `Assistant run failed: ${response.statusText}`;
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.message || errorData.detail || errorMessage;
+      } catch {
+        // If response is not JSON, use status text
+        const text = await response.text().catch(() => '');
+        if (text && !text.startsWith('<!')) {
+          errorMessage = text;
+        }
+      }
+      throw new Error(errorMessage);
     }
 
     return response.json();
