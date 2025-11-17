@@ -22,7 +22,7 @@ export default async function catchAllHandler(req, res) {
   console.log(`[Catch-all] Path param type:`, typeof pathParam, Array.isArray(pathParam));
   
   // Handle both string and array formats
-  let path: string;
+  let path;
   if (Array.isArray(pathParam)) {
     path = '/' + pathParam.join('/');
   } else if (typeof pathParam === 'string') {
