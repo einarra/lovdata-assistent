@@ -137,14 +137,18 @@ export default async function handler(req, res) {
       
       // Override res.end to track completion - MUST be set before calling Express
       res.end = function(...args) {
-        console.log(`[API] res.end() called, args: ${args.length}`);
+        console.log(`[API] res.end() called, args: ${args.length}, headersSent: ${res.headersSent}`);
+        const result = originalEnd(...args);
         if (!responseEnded) {
           responseEnded = true;
           clearInterval(checkExpressResponse);
           console.log(`[API] Response ended, resolving promise`);
-          resolve();
+          // Give Vercel a moment to process the response
+          setTimeout(() => {
+            resolve();
+          }, 0);
         }
-        return originalEnd(...args);
+        return result;
       };
       
       // Track Express response methods - MUST be set before calling Express
