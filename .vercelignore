@@ -1,9 +1,9 @@
-# Dependencies
+# Dependencies (exclude node_modules)
 node_modules/
 backend/node_modules/
 frontend/node_modules/
 
-# Build outputs (Vercel will build these)
+# Build outputs (Vercel will build these, so exclude existing dist folders)
 backend/dist/
 frontend/dist/
 
@@ -11,55 +11,19 @@ frontend/dist/
 .env
 .env.local
 .env.*.local
-backend/.env
-backend/.env.local
-frontend/.env
-frontend/.env.local
+backend/.env*
+frontend/.env*
 
 # Logs
 *.log
-backend/server.log
-backend/env-debug.log
-
-# Development files
-*.md
-!README.md
-docs/
-backend/CODE_REVIEW.md
-backend/ENV_REVIEW.md
-backend/EXAMPLE_TIMING_LOGS.md
-backend/LOG_FILE_LOCATION.md
-backend/LOGGER_TROUBLESHOOTING.md
-backend/LOGGER_VERIFICATION.md
-backend/SUPABASE_MIGRATION_REVIEW.md
-coderview.md
-planSupabase.md
-Stabilizing_Archive_Search_plan.md
-
-# Test files
-**/__tests__/
-**/*.test.ts
-**/*.test.js
-**/*.spec.ts
-**/*.spec.js
-
-# Scripts (not needed in production)
-backend/scripts/
-
-# Note: backend/src/ and backend/tsconfig.json are needed for building, so don't exclude them
 
 # Git
 .git/
-.gitignore
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Note: Keep backend/src/, backend/package.json, backend/tsconfig.json for building
+# Keep frontend/src/, frontend/package.json for building
 
