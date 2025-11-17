@@ -154,7 +154,11 @@ export default async function handler(req, res) {
       // Call Express app handler
       // Express app is a function, so call it directly
       console.log(`[API] Calling app() with method: ${req.method}, url: ${req.url}`);
-      app(req, res, (err) => {
+      console.log(`[API] Request object type: ${typeof req}, has method: ${!!req.method}, has url: ${!!req.url}`);
+      console.log(`[API] Response object type: ${typeof res}, has status: ${typeof res.status === 'function'}, has json: ${typeof res.json === 'function'}`);
+      
+      try {
+        app(req, res, (err) => {
         clearTimeout(timeout);
         console.log(`[API] app() callback called, err: ${err ? err.message : 'none'}, headersSent: ${res.headersSent}`);
         if (err) {
@@ -187,6 +191,21 @@ export default async function handler(req, res) {
           // The res.end wrapper will call resolve
         }
       });
+      } catch (expressError) {
+        clearTimeout(timeout);
+        console.error('[API] Error calling Express app:', expressError);
+        console.error('[API] Error stack:', expressError.stack);
+        if (!res.headersSent) {
+          res.status(500).json({ 
+            error: 'Failed to process request', 
+            message: expressError.message 
+          });
+        }
+        if (!responseEnded) {
+          responseEnded = true;
+          resolve();
+        }
+      }
     });
   } catch (error) {
     console.error('Handler error:', error);
