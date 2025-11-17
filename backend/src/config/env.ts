@@ -5,18 +5,25 @@ import { fileURLToPath } from 'url';
 import { existsSync, writeFileSync, readFileSync } from 'fs';
 
 // Write diagnostics to a file so we can always see them
+// In serverless environments (Vercel, AWS Lambda), filesystem is read-only except /tmp
 function writeDiag(msg: string) {
-  try {
-    const cwd = process.cwd();
-    const diagFile = path.join(cwd, 'env-debug.log');
-    const content = `${new Date().toISOString()}: ${msg}\n`;
-    writeFileSync(diagFile, content, { flag: 'a' });
-    // Also write to stderr as backup
-    process.stderr.write(`[DIAG] ${msg}\n`);
-  } catch (e: unknown) {
-    // Log error to stderr if file write fails
-    const error = e instanceof Error ? e.message : String(e);
-    process.stderr.write(`[DIAG ERROR] Failed to write diagnostic: ${error}\n`);
+  // Check if we're in a serverless environment
+  const isServerless = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.cwd().startsWith('/var/task');
+  
+  // Always write to stderr (visible in logs)
+  process.stderr.write(`[DIAG] ${msg}\n`);
+  
+  // Only try to write to file if not in serverless environment
+  if (!isServerless) {
+    try {
+      const cwd = process.cwd();
+      const diagFile = path.join(cwd, 'env-debug.log');
+      const content = `${new Date().toISOString()}: ${msg}\n`;
+      writeFileSync(diagFile, content, { flag: 'a' });
+    } catch (e: unknown) {
+      // Silently ignore file write errors in serverless (expected)
+      // Error already logged to stderr above
+    }
   }
 }
 
