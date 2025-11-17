@@ -127,7 +127,7 @@ export default async function handler(req, res) {
     return new Promise((resolve) => {
       let responseEnded = false;
       
-      // Track when response ends
+      // Save original methods BEFORE setting up wrappers
       const originalEnd = res.end.bind(res);
       const originalWrite = res.write.bind(res);
       const originalWriteHead = res.writeHead.bind(res);
@@ -135,18 +135,38 @@ export default async function handler(req, res) {
       const originalSend = res.send.bind(res);
       const originalStatus = res.status.bind(res);
       
-      // Override res.end to track completion
+      // Override res.end to track completion - MUST be set before calling Express
       res.end = function(...args) {
-        console.log(`[API] res.end() called, args: ${args.length}, responseEnded: ${responseEnded}`);
+        console.log(`[API] res.end() called, args: ${args.length}`);
         if (!responseEnded) {
           responseEnded = true;
           clearInterval(checkExpressResponse);
+          console.log(`[API] Response ended, resolving promise`);
           resolve();
         }
         return originalEnd(...args);
       };
       
-      // Track Express response methods
+      // Track Express response methods - MUST be set before calling Express
+      res.json = function(...args) {
+        console.log(`[API] res.json() called with data type: ${typeof args[0]}`);
+        const result = originalJson(...args);
+        // res.json() internally calls res.end(), so we should see res.end() called
+        return result;
+      };
+      
+      res.send = function(...args) {
+        console.log(`[API] res.send() called with data type: ${typeof args[0]}`);
+        const result = originalSend(...args);
+        // res.send() internally calls res.end(), so we should see res.end() called
+        return result;
+      };
+      
+      res.status = function(...args) {
+        console.log(`[API] res.status() called with: ${args[0]}`);
+        return originalStatus(...args);
+      };
+      
       res.write = function(...args) {
         console.log(`[API] res.write() called`);
         return originalWrite(...args);
@@ -155,41 +175,6 @@ export default async function handler(req, res) {
       res.writeHead = function(...args) {
         console.log(`[API] res.writeHead() called with status: ${args[0]}`);
         return originalWriteHead(...args);
-      };
-      
-      res.json = function(...args) {
-        console.log(`[API] res.json() called`);
-        if (!responseEnded && res.headersSent) {
-          // Response is being sent, wait for end
-          setTimeout(() => {
-            if (!responseEnded) {
-              responseEnded = true;
-              clearInterval(checkExpressResponse);
-              resolve();
-            }
-          }, 100);
-        }
-        return originalJson(...args);
-      };
-      
-      res.send = function(...args) {
-        console.log(`[API] res.send() called`);
-        if (!responseEnded && res.headersSent) {
-          // Response is being sent, wait for end
-          setTimeout(() => {
-            if (!responseEnded) {
-              responseEnded = true;
-              clearInterval(checkExpressResponse);
-              resolve();
-            }
-          }, 100);
-        }
-        return originalSend(...args);
-      };
-      
-      res.status = function(...args) {
-        console.log(`[API] res.status() called with: ${args[0]}`);
-        return originalStatus(...args);
       };
       
       // Add timeout to detect if Express doesn't respond
@@ -203,6 +188,9 @@ export default async function handler(req, res) {
             responseEnded = true;
             resolve();
           }
+        } else if (res.headersSent && !responseEnded) {
+          // Headers sent but response hasn't ended - wait a bit more
+          console.log(`[API] Headers sent but response not ended, waiting...`);
         }
       }, 5000);
       
