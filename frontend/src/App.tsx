@@ -454,7 +454,9 @@ function App() {
         <div className="error-banner">
           <p>{error}</p>
           <p className="error-hint">
-            Sørg for at API-serveren kjører på http://localhost:4000 eller{' '}
+            {import.meta.env.PROD 
+              ? 'Kunne ikke nå API-serveren. ' 
+              : 'Sørg for at API-serveren kjører på http://localhost:4000 eller '}
             <button className="link-button" onClick={() => void checkHealth()}>
               prøv igjen nå
             </button>
