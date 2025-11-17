@@ -6,7 +6,15 @@
   "framework": null,
   "rewrites": [
     {
-      "source": "/((?!api).*)",
+      "source": "/",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/om-oss",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/kontakt-oss",
       "destination": "/index.html"
     }
   ],
