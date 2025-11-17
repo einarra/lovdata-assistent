@@ -84,7 +84,14 @@ writeDiag(`Checked path 2: ${cwdEnvPath}`);
 writeDiag(`Current working dir: ${process.cwd()}`);
 
 if (result.error) {
-  writeDiag(`ERROR loading .env: ${result.error.message}`);
+  // In serverless environments, .env file doesn't exist (env vars are set in platform)
+  // This is expected and not an error
+  const isServerless = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.cwd().startsWith('/var/task');
+  if (!isServerless) {
+    writeDiag(`ERROR loading .env: ${result.error.message}`);
+  } else {
+    writeDiag(`INFO: .env file not found (expected in serverless environment, using platform env vars)`);
+  }
 } else if (result.parsed) {
   const keyCount = Object.keys(result.parsed).length;
   writeDiag(`✓ Loaded ${keyCount} vars from .env file`);

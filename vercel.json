@@ -11,18 +11,6 @@
     {
       "source": "/vite.svg",
       "destination": "/public/vite.svg"
-    },
-    {
-      "source": "/",
-      "destination": "/public/index.html"
-    },
-    {
-      "source": "/om-oss",
-      "destination": "/public/index.html"
-    },
-    {
-      "source": "/kontakt-oss",
-      "destination": "/public/index.html"
     }
   ],
   "functions": {
