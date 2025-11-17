@@ -47,41 +47,62 @@ async function initializeApp() {
 
 // Export the handler for Vercel
 export default async function handler(req, res) {
-  // Ensure app is initialized
-  const app = await initializeApp();
-  
-  // Strip /api prefix from the request path
-  // Vercel routes /api/* to this function, but Express expects paths without /api
-  if (req.url && req.url.startsWith('/api')) {
-    // Update all path-related properties
-    req.url = req.url.replace(/^\/api/, '') || '/';
-    req.originalUrl = req.originalUrl ? req.originalUrl.replace(/^\/api/, '') || '/' : req.url;
-    if (req.path) {
-      req.path = req.path.replace(/^\/api/, '') || '/';
-    }
-    if (req.baseUrl) {
-      req.baseUrl = req.baseUrl.replace(/^\/api/, '') || '';
-    }
-  }
-  
-  // Vercel's req/res are compatible with Express
-  // Use the Express app to handle the request
-  return new Promise((resolve, reject) => {
-    // Ensure response is properly handled
-    const originalEnd = res.end.bind(res);
-    res.end = function(...args) {
-      originalEnd(...args);
-      resolve();
-    };
+  try {
+    // Ensure app is initialized
+    const app = await initializeApp();
     
-    app(req, res, (err) => {
-      if (err) {
-        reject(err);
-      } else if (!res.headersSent) {
-        // If Express didn't send a response, resolve anyway
-        resolve();
+    // Strip /api prefix from the request path
+    // Vercel routes /api/* to this function, but Express expects paths without /api
+    const originalUrl = req.url || req.path || '/';
+    if (originalUrl.startsWith('/api')) {
+      // Update all path-related properties
+      req.url = originalUrl.replace(/^\/api/, '') || '/';
+      req.originalUrl = req.originalUrl ? req.originalUrl.replace(/^\/api/, '') || '/' : req.url;
+      if (req.path) {
+        req.path = req.path.replace(/^\/api/, '') || '/';
       }
+      if (req.baseUrl) {
+        req.baseUrl = req.baseUrl.replace(/^\/api/, '') || '';
+      }
+    } else if (!req.url) {
+      // If url is not set, use path or default to /
+      req.url = req.path || '/';
+    }
+    
+    // Vercel's req/res are compatible with Express
+    // Use the Express app to handle the request
+    return new Promise((resolve, reject) => {
+      // Ensure response is properly handled
+      const originalEnd = res.end.bind(res);
+      res.end = function(...args) {
+        originalEnd(...args);
+        resolve();
+      };
+      
+      app(req, res, (err) => {
+        if (err) {
+          console.error('Express error:', err);
+          if (!res.headersSent) {
+            res.status(500).json({ error: 'Internal server error', message: err.message });
+          }
+          reject(err);
+        } else if (!res.headersSent) {
+          // If Express didn't send a response, send 404
+          res.status(404).json({ error: 'Not found', path: req.url });
+          resolve();
+        }
+      });
     });
-  });
+  } catch (error) {
+    console.error('Handler error:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ 
+        error: 'Failed to initialize server', 
+        message: error.message,
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      });
+    }
+    throw error;
+  }
 }
 
