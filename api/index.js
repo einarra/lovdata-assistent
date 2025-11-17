@@ -152,7 +152,8 @@ export default async function handler(req, res) {
       }, 5000);
       
       // Call Express app handler
-      app(req, res, (err) => {
+      // Use app.handle() which is the proper way to invoke Express in serverless
+      app.handle(req, res, (err) => {
         clearTimeout(timeout);
         if (err) {
           console.error('Express error:', err);
