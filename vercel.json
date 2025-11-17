@@ -4,21 +4,9 @@
   "outputDirectory": "frontend/dist",
   "installCommand": "echo 'Skipping install - done in build command'",
   "framework": null,
-  "cleanUrls": true,
-  "trailingSlash": false,
   "rewrites": [
     {
-      "source": "/api/:path*",
-      "has": [
-        {
-          "type": "header",
-          "key": "x-vercel-id"
-        }
-      ],
-      "destination": "/api/:path*"
-    },
-    {
-      "source": "/(.*)",
+      "source": "/((?!api).*)",
       "destination": "/index.html"
     }
   ],
