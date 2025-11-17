@@ -21,23 +21,36 @@ async function initializeApp() {
   
   initPromise = (async () => {
     try {
+      console.log('Starting backend initialization...');
       // Initialize serverless backend (sets up archive store, etc.)
-      const { initializeServerless } = await import('../backend/dist/serverless.js');
-      await initializeServerless();
+      try {
+        const { initializeServerless } = await import('../backend/dist/serverless.js');
+        await initializeServerless();
+        console.log('Serverless backend initialized successfully');
+      } catch (initError) {
+        console.error('Serverless initialization failed, continuing with basic app:', initError);
+        // Continue even if initialization fails - some endpoints may still work
+      }
       
-      // Create the Express app after initialization
+      // Create the Express app after initialization (or even if it failed)
       const { createApp } = await import('../backend/dist/http/app.js');
       const app = createApp();
       appInstance = app;
+      console.log('Express app created successfully');
       return app;
     } catch (error) {
-      console.error('Failed to initialize backend:', error);
-      // Fallback: create app without full initialization
-      // This allows the app to start even if some services aren't ready
-      const { createApp } = await import('../backend/dist/http/app.js');
-      const app = createApp();
-      appInstance = app;
-      return app;
+      console.error('Failed to create Express app:', error);
+      console.error('Error stack:', error.stack);
+      // Even if everything fails, try to create a minimal app
+      try {
+        const { createApp } = await import('../backend/dist/http/app.js');
+        const app = createApp();
+        appInstance = app;
+        return app;
+      } catch (fallbackError) {
+        console.error('Fallback app creation also failed:', fallbackError);
+        throw error; // Re-throw original error
+      }
     }
   })();
   
@@ -47,6 +60,9 @@ async function initializeApp() {
 
 // Export the handler for Vercel
 export default async function handler(req, res) {
+  // Log request for debugging
+  console.log(`[API] ${req.method} ${req.url || req.path || '/'}`);
+  
   try {
     // Ensure app is initialized
     const app = await initializeApp();
