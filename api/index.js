@@ -131,6 +131,9 @@ export default async function handler(req, res) {
       const originalEnd = res.end.bind(res);
       const originalWrite = res.write.bind(res);
       const originalWriteHead = res.writeHead.bind(res);
+      const originalJson = res.json.bind(res);
+      const originalSend = res.send.bind(res);
+      const originalStatus = res.status.bind(res);
       
       // Override res.end to track completion
       res.end = function(...args) {
@@ -143,7 +146,7 @@ export default async function handler(req, res) {
         return originalEnd(...args);
       };
       
-      // Also track write and writeHead to see if Express is sending data
+      // Track Express response methods
       res.write = function(...args) {
         console.log(`[API] res.write() called`);
         return originalWrite(...args);
@@ -152,6 +155,41 @@ export default async function handler(req, res) {
       res.writeHead = function(...args) {
         console.log(`[API] res.writeHead() called with status: ${args[0]}`);
         return originalWriteHead(...args);
+      };
+      
+      res.json = function(...args) {
+        console.log(`[API] res.json() called`);
+        if (!responseEnded && res.headersSent) {
+          // Response is being sent, wait for end
+          setTimeout(() => {
+            if (!responseEnded) {
+              responseEnded = true;
+              clearInterval(checkExpressResponse);
+              resolve();
+            }
+          }, 100);
+        }
+        return originalJson(...args);
+      };
+      
+      res.send = function(...args) {
+        console.log(`[API] res.send() called`);
+        if (!responseEnded && res.headersSent) {
+          // Response is being sent, wait for end
+          setTimeout(() => {
+            if (!responseEnded) {
+              responseEnded = true;
+              clearInterval(checkExpressResponse);
+              resolve();
+            }
+          }, 100);
+        }
+        return originalSend(...args);
+      };
+      
+      res.status = function(...args) {
+        console.log(`[API] res.status() called with: ${args[0]}`);
+        return originalStatus(...args);
       };
       
       // Add timeout to detect if Express doesn't respond
