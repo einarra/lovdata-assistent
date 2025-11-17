@@ -4,7 +4,7 @@
   "description": "Lovdata Assistant - Fullstack application for legal search and answers",
   "private": true,
   "scripts": {
-    "build": "cd backend && NODE_ENV=development npm install && npm run build && cd ../frontend && npm install && npm run build",
+    "build": "cd backend && NODE_ENV=development npm install && npm run build && cd ../frontend && NODE_ENV=development npm install && npm run build",
     "dev:backend": "cd backend && npm run dev",
     "dev:frontend": "cd frontend && npm run dev",
     "install:all": "cd backend && NODE_ENV=development npm install && cd ../frontend && npm install"
