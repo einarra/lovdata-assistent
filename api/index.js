@@ -129,12 +129,29 @@ export default async function handler(req, res) {
       
       // Track when response ends
       const originalEnd = res.end.bind(res);
+      const originalWrite = res.write.bind(res);
+      const originalWriteHead = res.writeHead.bind(res);
+      
+      // Override res.end to track completion
       res.end = function(...args) {
+        console.log(`[API] res.end() called, args: ${args.length}, responseEnded: ${responseEnded}`);
         if (!responseEnded) {
           responseEnded = true;
+          clearInterval(checkExpressResponse);
           resolve();
         }
         return originalEnd(...args);
+      };
+      
+      // Also track write and writeHead to see if Express is sending data
+      res.write = function(...args) {
+        console.log(`[API] res.write() called`);
+        return originalWrite(...args);
+      };
+      
+      res.writeHead = function(...args) {
+        console.log(`[API] res.writeHead() called with status: ${args[0]}`);
+        return originalWriteHead(...args);
       };
       
       // Add timeout to detect if Express doesn't respond
