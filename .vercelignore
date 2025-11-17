@@ -45,11 +45,8 @@ Stabilizing_Archive_Search_plan.md
 
 # Scripts (not needed in production)
 backend/scripts/
-backend/src/scripts/
 
-# TypeScript source (only dist is needed)
-backend/src/
-backend/tsconfig.json
+# Note: backend/src/ and backend/tsconfig.json are needed for building, so don't exclude them
 
 # Git
 .git/
