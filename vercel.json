@@ -6,16 +6,16 @@
   "framework": null,
   "rewrites": [
     {
-      "source": "/api/:path*",
-      "destination": "/api/:path*"
-    },
-    {
-      "source": "/(.*)",
+      "source": "/((?!api|_next|favicon.ico).*)",
       "destination": "/index.html"
     }
   ],
   "functions": {
     "api/index.js": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "api/[...path].js": {
       "maxDuration": 60,
       "memory": 1024
     }
