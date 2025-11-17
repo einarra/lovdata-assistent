@@ -100,19 +100,48 @@ export default async function handler(req, res) {
     
     console.log(`[API] Final path for Express: ${path}`);
     console.log(`[API] Request method: ${req.method}`);
-    console.log(`[API] Request headers:`, JSON.stringify(req.headers, null, 2));
+    console.log(`[API] Final req.url: ${req.url}`);
+    console.log(`[API] Final req.path: ${req.path}`);
+    console.log(`[API] Final req.originalUrl: ${req.originalUrl}`);
     
     // Vercel's req/res are compatible with Express
     // Use the Express app to handle the request
     return new Promise((resolve, reject) => {
+      let responseSent = false;
+      
       // Ensure response is properly handled
       const originalEnd = res.end.bind(res);
+      const originalJson = res.json.bind(res);
+      const originalSend = res.send.bind(res);
+      
+      // Wrap response methods to track when response is sent
       res.end = function(...args) {
+        responseSent = true;
         originalEnd(...args);
         resolve();
       };
       
+      res.json = function(...args) {
+        responseSent = true;
+        return originalJson(...args);
+      };
+      
+      res.send = function(...args) {
+        responseSent = true;
+        return originalSend(...args);
+      };
+      
+      // Add timeout to detect if Express doesn't respond
+      const timeout = setTimeout(() => {
+        if (!responseSent && !res.headersSent) {
+          console.error('[API] Timeout: Express did not send a response');
+          res.status(404).json({ error: 'Not found', path: req.url, method: req.method });
+          resolve();
+        }
+      }, 5000);
+      
       app(req, res, (err) => {
+        clearTimeout(timeout);
         if (err) {
           console.error('Express error:', err);
           console.error('Express error stack:', err.stack);
@@ -125,9 +154,10 @@ export default async function handler(req, res) {
             });
           }
           resolve(); // Don't reject, just resolve after sending error
-        } else if (!res.headersSent) {
+        } else if (!res.headersSent && !responseSent) {
           // If Express didn't send a response, send 404
-          res.status(404).json({ error: 'Not found', path: req.url });
+          console.error(`[API] Express did not handle route: ${req.method} ${req.url}`);
+          res.status(404).json({ error: 'Not found', path: req.url, method: req.method });
           resolve();
         } else {
           resolve(); // Response was sent, resolve
