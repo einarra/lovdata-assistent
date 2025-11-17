@@ -153,8 +153,10 @@ export default async function handler(req, res) {
       
       // Call Express app handler
       // Use app.handle() which is the proper way to invoke Express in serverless
+      console.log(`[API] Calling app.handle() with method: ${req.method}, url: ${req.url}`);
       app.handle(req, res, (err) => {
         clearTimeout(timeout);
+        console.log(`[API] app.handle() callback called, err: ${err ? err.message : 'none'}, headersSent: ${res.headersSent}`);
         if (err) {
           console.error('Express error:', err);
           console.error('Express error stack:', err.stack);
@@ -173,12 +175,14 @@ export default async function handler(req, res) {
         } else if (!res.headersSent) {
           // If Express didn't send a response, send 404
           console.error(`[API] Express did not handle route: ${req.method} ${req.url}`);
+          console.error(`[API] Response headers sent: ${res.headersSent}, response ended: ${responseEnded}`);
           res.status(404).json({ error: 'Not found', path: req.url, method: req.method });
           if (!responseEnded) {
             responseEnded = true;
             resolve();
           }
-        } else if (!responseEnded) {
+        } else {
+          console.log(`[API] Express handled route successfully, headers sent: ${res.headersSent}`);
           // Response was sent, wait for it to end
           // The res.end wrapper will call resolve
         }
