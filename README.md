@@ -86,10 +86,21 @@ npm test   # dersom testsuite er konfigurert
 
 ## Distribusjon
 
+### Vercel (Anbefalt)
+
+Prosjektet er konfigurert for produksjonsdeploy på Vercel. Se [VERCEL_DEPLOYMENT.md](./VERCEL_DEPLOYMENT.md) for detaljert guide.
+
+**Hurtigstart:**
+1. Koble Git-repository til Vercel
+2. Sett opp miljøvariabler i Vercel Dashboard
+3. Deploy skjer automatisk ved push til main branch
+
+### Andre plattformer
+
 1. Sørg for at nødvendige hemmeligheter er tilgjengelige for runtime (OpenAI, Lovdata API, Stripe, LangSmith etc.).
 2. Bygg både backend og frontend.
 3. Deploy backend som Node-app (container, PM2, serverless e.l.).
-4. Server frontend-dist som statiske filer (Netlify, Vercel, Nginx, etc.) og pek den mot backend-URL-en.
+4. Server frontend-dist som statiske filer (Netlify, Nginx, etc.) og pek den mot backend-URL-en.
 
 ## Videre arbeid
 

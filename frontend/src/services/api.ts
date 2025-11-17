@@ -1,4 +1,9 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+// In production on Vercel, use /api prefix for backend routes
+// In development, use VITE_API_URL or default to localhost
+const isProduction = import.meta.env.PROD;
+const API_BASE_URL = isProduction 
+  ? '/api' 
+  : (import.meta.env.VITE_API_URL || 'http://localhost:4000');
 
 export interface SkillRunRequest {
   input: unknown;
