@@ -14,13 +14,25 @@ export default async function catchAllHandler(req, res) {
     : '/' + String(pathSegments);
   
   // Log for debugging
-  console.log(`[Catch-all] Original URL: ${req.url}, Path segments:`, pathSegments, `Reconstructed path: ${path}`);
+  console.log(`[Catch-all] Method: ${req.method}`);
+  console.log(`[Catch-all] Original URL: ${req.url}`);
+  console.log(`[Catch-all] Original path: ${req.path}`);
+  console.log(`[Catch-all] Query:`, JSON.stringify(req.query));
+  console.log(`[Catch-all] Path segments:`, pathSegments);
+  console.log(`[Catch-all] Reconstructed path: ${path}`);
   
   // Set the reconstructed path on the request
   // The main handler expects paths without /api prefix
   req.url = path;
   req.path = path;
   req.originalUrl = req.originalUrl || '/api' + path;
+  
+  // Also set query.path to undefined so the main handler doesn't try to use it again
+  if (req.query) {
+    delete req.query.path;
+  }
+  
+  console.log(`[Catch-all] Calling main handler with path: ${path}`);
   
   // Call the main handler
   return handler(req, res);
