@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
-    "build": "./node_modules/.bin/tsc -p tsconfig.json",
+    "build": "npm exec -- tsc -p tsconfig.json",
     "reindex": "tsx src/scripts/reindexArchives.ts",
     "bench": "tsx src/scripts/benchmarkSearch.ts",
     "export-lovdata": "tsx scripts/exportLovdata.ts",
