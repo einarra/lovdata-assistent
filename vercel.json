@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "buildCommand": "cd backend && NODE_ENV=development npm install && npm run build && cd ../frontend && npm install && npm run build",
+  "buildCommand": "cd backend && NODE_ENV=development npm install && (cd backend && npm run build) && cd ../frontend && npm install && npm run build",
   "outputDirectory": "frontend/dist",
   "installCommand": "echo 'Dependencies installed in build command'",
   "framework": null,
