@@ -89,12 +89,27 @@ class ApiService {
     this.baseUrl = baseUrl;
   }
 
+  // Helper to safely parse JSON responses
+  private async parseJsonResponse<T>(response: Response): Promise<T> {
+    const contentType = response.headers.get('content-type');
+    if (!contentType || !contentType.includes('application/json')) {
+      const text = await response.text();
+      throw new Error(`Expected JSON but got ${contentType}. Response: ${text.substring(0, 100)}`);
+    }
+    try {
+      return await response.json();
+    } catch (error) {
+      const text = await response.text();
+      throw new Error(`Failed to parse JSON: ${error instanceof Error ? error.message : String(error)}. Response: ${text.substring(0, 100)}`);
+    }
+  }
+
   async healthCheck(): Promise<HealthResponse> {
     const response = await fetch(`${this.baseUrl}/health`);
     if (!response.ok) {
       let errorMessage = `Health check failed: ${response.statusText}`;
       try {
-        const errorData = await response.json();
+        const errorData = await this.parseJsonResponse(response);
         errorMessage = errorData.message || errorData.detail || errorMessage;
       } catch {
         // If response is not JSON, try to get text
@@ -105,7 +120,7 @@ class ApiService {
       }
       throw new Error(errorMessage);
     }
-    return response.json();
+    return this.parseJsonResponse<HealthResponse>(response);
   }
 
   async runSkill(payload: SkillRunRequest): Promise<SkillRunResponse> {
@@ -132,7 +147,7 @@ class ApiService {
       throw new Error(errorMessage);
     }
 
-    return response.json();
+    return this.parseJsonResponse<SkillRunResponse>(response);
   }
 
   async assistantRun(payload: AssistantRunRequest, token?: string): Promise<AssistantRunResponse> {
@@ -160,7 +175,7 @@ class ApiService {
       throw new Error(errorMessage);
     }
 
-    return response.json();
+    return this.parseJsonResponse<AssistantRunResponse>(response);
   }
 
   async fetchSession(token: string): Promise<SessionInfo> {
@@ -170,9 +185,20 @@ class ApiService {
       }
     });
     if (!response.ok) {
-      throw new Error('Kunne ikke hente sesjonsinformasjon');
+      let errorMessage = 'Kunne ikke hente sesjonsinformasjon';
+      try {
+        const errorData = await this.parseJsonResponse(response);
+        errorMessage = errorData.message || errorData.detail || errorMessage;
+      } catch {
+        // If response is not JSON, use status text
+        const text = await response.text().catch(() => '');
+        if (text && !text.startsWith('<!')) {
+          errorMessage = text;
+        }
+      }
+      throw new Error(errorMessage);
     }
-    return response.json();
+    return this.parseJsonResponse<SessionInfo>(response);
   }
 }
 
