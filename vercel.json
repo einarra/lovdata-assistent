@@ -5,11 +5,15 @@
   "framework": null,
   "rewrites": [
     {
-      "source": "/((?!api).*)",
-      "destination": "/frontend/dist/$1"
+      "source": "/assets/:path*",
+      "destination": "/frontend/dist/assets/:path*"
     },
     {
-      "source": "/",
+      "source": "/vite.svg",
+      "destination": "/frontend/dist/vite.svg"
+    },
+    {
+      "source": "/(.*)",
       "destination": "/frontend/dist/index.html"
     }
   ],
