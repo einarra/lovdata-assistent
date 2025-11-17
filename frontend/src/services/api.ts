@@ -91,17 +91,35 @@ class ApiService {
 
   // Helper to safely parse JSON responses
   private async parseJsonResponse<T>(response: Response): Promise<T> {
+    // Clone response so we can read it multiple times if needed
+    const clonedResponse = response.clone();
     const contentType = response.headers.get('content-type');
+    
     if (!contentType || !contentType.includes('application/json')) {
-      const text = await response.text();
-      throw new Error(`Expected JSON but got ${contentType}. Response: ${text.substring(0, 100)}`);
+      const text = await clonedResponse.text();
+      throw new Error(`Expected JSON but got ${contentType || 'unknown'}. Response: ${text.substring(0, 100)}`);
     }
+    
     try {
       return await response.json();
     } catch (error) {
-      const text = await response.text();
+      const text = await clonedResponse.text();
       throw new Error(`Failed to parse JSON: ${error instanceof Error ? error.message : String(error)}. Response: ${text.substring(0, 100)}`);
     }
+  }
+  
+  // Helper to safely parse error responses (response body can only be read once)
+  private async parseErrorResponse(response: Response): Promise<{ message?: string; detail?: string }> {
+    const contentType = response.headers.get('content-type');
+    if (contentType && contentType.includes('application/json')) {
+      try {
+        return await response.json();
+      } catch {
+        // If JSON parsing fails, return empty object
+        return {};
+      }
+    }
+    return {};
   }
 
   async healthCheck(): Promise<HealthResponse> {
@@ -109,14 +127,10 @@ class ApiService {
     if (!response.ok) {
       let errorMessage = `Health check failed: ${response.statusText}`;
       try {
-        const errorData = await this.parseJsonResponse(response);
+        const errorData = await this.parseErrorResponse(response);
         errorMessage = errorData.message || errorData.detail || errorMessage;
       } catch {
-        // If response is not JSON, try to get text
-        const text = await response.text().catch(() => '');
-        if (text && !text.startsWith('<!')) {
-          errorMessage = text;
-        }
+        // If parsing fails, use status text
       }
       throw new Error(errorMessage);
     }
@@ -135,14 +149,10 @@ class ApiService {
     if (!response.ok) {
       let errorMessage = `Skill run failed: ${response.statusText}`;
       try {
-        const errorData = await response.json();
+        const errorData = await this.parseErrorResponse(response);
         errorMessage = errorData.message || errorData.detail || errorMessage;
       } catch {
-        // If response is not JSON, use status text
-        const text = await response.text().catch(() => '');
-        if (text && !text.startsWith('<!')) {
-          errorMessage = text;
-        }
+        // If parsing fails, use status text
       }
       throw new Error(errorMessage);
     }
@@ -163,14 +173,10 @@ class ApiService {
     if (!response.ok) {
       let errorMessage = `Assistant run failed: ${response.statusText}`;
       try {
-        const errorData = await response.json();
+        const errorData = await this.parseErrorResponse(response);
         errorMessage = errorData.message || errorData.detail || errorMessage;
       } catch {
-        // If response is not JSON, use status text
-        const text = await response.text().catch(() => '');
-        if (text && !text.startsWith('<!')) {
-          errorMessage = text;
-        }
+        // If parsing fails, use status text
       }
       throw new Error(errorMessage);
     }
@@ -187,14 +193,10 @@ class ApiService {
     if (!response.ok) {
       let errorMessage = 'Kunne ikke hente sesjonsinformasjon';
       try {
-        const errorData = await this.parseJsonResponse(response);
+        const errorData = await this.parseErrorResponse(response);
         errorMessage = errorData.message || errorData.detail || errorMessage;
       } catch {
-        // If response is not JSON, use status text
-        const text = await response.text().catch(() => '');
-        if (text && !text.startsWith('<!')) {
-          errorMessage = text;
-        }
+        // If parsing fails, use default message
       }
       throw new Error(errorMessage);
     }
