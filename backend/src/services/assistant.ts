@@ -583,20 +583,19 @@ function normaliseCitations(
   const evidenceIds = new Set(evidence.map(item => item.id));
   return citations
     .filter(citation => evidenceIds.has(citation.evidenceId))
-    .map(citation => {
+    .flatMap(citation => {
       const position = evidenceIndexMap.get(citation.evidenceId);
       if (!position) {
         // Should not happen after filter, but handle gracefully
-        return null;
+        return [];
       }
-      return {
+      return [{
         evidenceId: citation.evidenceId,
         // Always use the calculated position, ignoring agent's label
         label: `[${position}]`,
         quote: citation.quote
-      };
-    })
-    .filter((citation): citation is AgentOutputCitation => citation !== null);
+      }];
+    });
 }
 
 function buildFallbackAnswer(question: string, evidence: AgentEvidence[], provider: string | null): string {
