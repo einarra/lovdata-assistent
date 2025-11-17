@@ -104,42 +104,54 @@ export default async function handler(req, res) {
     console.log(`[API] Final req.path: ${req.path}`);
     console.log(`[API] Final req.originalUrl: ${req.originalUrl}`);
     
+    // Ensure request has all necessary properties for Express
+    // Vercel's req/res should be compatible, but let's make sure
+    if (!req.method) {
+      req.method = 'GET';
+    }
+    if (!req.url) {
+      req.url = path;
+    }
+    if (!req.path) {
+      req.path = path;
+    }
+    if (!req.originalUrl) {
+      req.originalUrl = '/api' + path;
+    }
+    if (!req.baseUrl) {
+      req.baseUrl = '';
+    }
+    
     // Vercel's req/res are compatible with Express
     // Use the Express app to handle the request
-    return new Promise((resolve, reject) => {
-      let responseSent = false;
+    return new Promise((resolve) => {
+      let responseEnded = false;
       
-      // Ensure response is properly handled
+      // Track when response ends
       const originalEnd = res.end.bind(res);
-      const originalJson = res.json.bind(res);
-      const originalSend = res.send.bind(res);
-      
-      // Wrap response methods to track when response is sent
       res.end = function(...args) {
-        responseSent = true;
-        originalEnd(...args);
-        resolve();
-      };
-      
-      res.json = function(...args) {
-        responseSent = true;
-        return originalJson(...args);
-      };
-      
-      res.send = function(...args) {
-        responseSent = true;
-        return originalSend(...args);
+        if (!responseEnded) {
+          responseEnded = true;
+          resolve();
+        }
+        return originalEnd(...args);
       };
       
       // Add timeout to detect if Express doesn't respond
       const timeout = setTimeout(() => {
-        if (!responseSent && !res.headersSent) {
+        if (!responseEnded && !res.headersSent) {
           console.error('[API] Timeout: Express did not send a response');
-          res.status(404).json({ error: 'Not found', path: req.url, method: req.method });
-          resolve();
+          if (!res.headersSent) {
+            res.status(404).json({ error: 'Not found', path: req.url, method: req.method });
+          }
+          if (!responseEnded) {
+            responseEnded = true;
+            resolve();
+          }
         }
       }, 5000);
       
+      // Call Express app handler
       app(req, res, (err) => {
         clearTimeout(timeout);
         if (err) {
@@ -153,14 +165,21 @@ export default async function handler(req, res) {
               ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
             });
           }
-          resolve(); // Don't reject, just resolve after sending error
-        } else if (!res.headersSent && !responseSent) {
+          if (!responseEnded) {
+            responseEnded = true;
+            resolve();
+          }
+        } else if (!res.headersSent) {
           // If Express didn't send a response, send 404
           console.error(`[API] Express did not handle route: ${req.method} ${req.url}`);
           res.status(404).json({ error: 'Not found', path: req.url, method: req.method });
-          resolve();
-        } else {
-          resolve(); // Response was sent, resolve
+          if (!responseEnded) {
+            responseEnded = true;
+            resolve();
+          }
+        } else if (!responseEnded) {
+          // Response was sent, wait for it to end
+          // The res.end wrapper will call resolve
         }
       });
     });
