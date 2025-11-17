@@ -62,28 +62,39 @@ async function initializeApp() {
 export default async function handler(req, res) {
   // Log request for debugging
   console.log(`[API] ${req.method} ${req.url || req.path || '/'}`);
+  console.log(`[API] Query:`, req.query);
+  console.log(`[API] Original URL:`, req.originalUrl);
   
   try {
     // Ensure app is initialized
     const app = await initializeApp();
     
-    // Strip /api prefix from the request path
+    // Handle path reconstruction
     // Vercel routes /api/* to this function, but Express expects paths without /api
-    const originalUrl = req.url || req.path || '/';
-    if (originalUrl.startsWith('/api')) {
-      // Update all path-related properties
-      req.url = originalUrl.replace(/^\/api/, '') || '/';
-      req.originalUrl = req.originalUrl ? req.originalUrl.replace(/^\/api/, '') || '/' : req.url;
-      if (req.path) {
-        req.path = req.path.replace(/^\/api/, '') || '/';
-      }
-      if (req.baseUrl) {
-        req.baseUrl = req.baseUrl.replace(/^\/api/, '') || '';
-      }
-    } else if (!req.url) {
-      // If url is not set, use path or default to /
-      req.url = req.path || '/';
+    let path = req.url || req.path || '/';
+    
+    // If path starts with /api, strip it
+    if (path.startsWith('/api')) {
+      path = path.replace(/^\/api/, '') || '/';
     }
+    
+    // If we have query.path (from catch-all), use that instead
+    if (req.query && req.query.path) {
+      const pathSegments = Array.isArray(req.query.path) 
+        ? req.query.path 
+        : [req.query.path];
+      path = '/' + pathSegments.join('/');
+      console.log(`[API] Reconstructed path from query: ${path}`);
+    }
+    
+    // Update all path-related properties
+    req.url = path;
+    req.path = path;
+    if (!req.originalUrl) {
+      req.originalUrl = '/api' + path;
+    }
+    
+    console.log(`[API] Final path: ${path}`);
     
     // Vercel's req/res are compatible with Express
     // Use the Express app to handle the request
