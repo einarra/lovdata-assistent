@@ -3,18 +3,11 @@
   "buildCommand": "npm run build",
   "installCommand": "echo 'Skipping install - done in build command'",
   "framework": null,
+  "outputDirectory": "public",
   "rewrites": [
     {
-      "source": "/assets/:path*",
-      "destination": "/frontend/dist/assets/:path*"
-    },
-    {
-      "source": "/vite.svg",
-      "destination": "/frontend/dist/vite.svg"
-    },
-    {
-      "source": "/(.*)",
-      "destination": "/frontend/dist/index.html"
+      "source": "/((?!api).*)",
+      "destination": "/index.html"
     }
   ],
   "functions": {
