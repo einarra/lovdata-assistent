@@ -1,0 +1,122 @@
+.contact-wrapper {
+  max-width: 960px;
+  margin: 40px auto;
+  padding: 0 24px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+  color: #1a2332;
+}
+
+.contact-section {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 24px 28px;
+  box-shadow: 0 6px 18px rgba(15, 22, 35, 0.08);
+}
+
+.contact-section h2,
+.contact-section h3,
+.contact-section h4 {
+  margin-bottom: 16px;
+  font-weight: 600;
+  color: #1a2332;
+}
+
+.contact-section p {
+  line-height: 1.7;
+  color: #2d3748;
+  margin-bottom: 12px;
+}
+
+.contact-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.contact-card {
+  border: 1px solid #edf2f7;
+  border-radius: 8px;
+  padding: 20px;
+  background: #fafbfc;
+}
+
+.contact-card h4 {
+  margin-bottom: 8px;
+}
+
+.contact-card a {
+  color: #1a54b9;
+  text-decoration: none;
+}
+
+.contact-card a:hover {
+  text-decoration: underline;
+}
+
+.contact-description {
+  font-size: 14px;
+  color: #4a5568;
+  margin-top: 4px;
+}
+
+.contact-form {
+  display: grid;
+  gap: 16px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.form-group label {
+  font-weight: 500;
+  color: #1a2332;
+}
+
+.form-group input,
+.form-group select,
+.form-group textarea {
+  border: 1px solid #cbd5e0;
+  border-radius: 6px;
+  padding: 12px 14px;
+  font-size: 15px;
+  color: #1a2332;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+  border-color: #1a54b9;
+  box-shadow: 0 0 0 3px rgba(31, 84, 185, 0.15);
+  outline: none;
+}
+
+.contact-submit {
+  padding: 12px 18px;
+  border-radius: 6px;
+  border: none;
+  background: #1f2a3a;
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 500;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+@media (max-width: 768px) {
+  .contact-wrapper {
+    margin: 24px auto;
+    padding: 0 16px 32px;
+    gap: 24px;
+  }
+
+  .contact-section {
+    padding: 20px 22px;
+  }
+}

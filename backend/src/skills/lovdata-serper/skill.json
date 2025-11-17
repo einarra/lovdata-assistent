@@ -1,0 +1,14 @@
+{
+  "name": "lovdata-serper",
+  "version": "1.0.0",
+  "summary": "Perform targeted web searches on Lovdata.no via Serper.",
+  "description": "Uses the Serper API to browse Lovdata.no, returning curated organic results and snippets.",
+  "tags": ["lovdata", "search", "serper"],
+  "matchers": [
+    { "includes": ["search", "lovdata"], "weight": 0.95 },
+    { "includes": ["browse", "lovdata"], "weight": 0.9 },
+    { "includes": ["serper"], "weight": 0.85 },
+    { "includes": [], "weight": 0.55 }
+  ],
+  "module": "index"
+}

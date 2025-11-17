@@ -1,0 +1,14 @@
+{
+  "name": "lovdata-api",
+  "version": "1.0.0",
+  "summary": "Query structured legal data directly from Lovdata's official API.",
+  "description": "Provides read-only access to Lovdata's public endpoints for listing datasets and fetching JSON legal metadata.",
+  "tags": ["lovdata", "legal", "api"],
+  "matchers": [
+    { "includes": ["lovdata"], "weight": 0.96 },
+    { "includes": ["legal", "dataset"], "weight": 0.92 },
+    { "includes": ["statute"], "weight": 0.65 },
+    { "includes": [], "weight": 0.7 }
+  ],
+  "module": "index"
+}

@@ -1,0 +1,50 @@
+{
+  "name": "lovdata-backend",
+  "version": "1.0.0",
+  "description": "Skill-based backend for Dental Hire leveraging Lovdata data sources",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "reindex": "tsx src/scripts/reindexArchives.ts",
+    "bench": "tsx src/scripts/benchmarkSearch.ts",
+    "export-lovdata": "tsx scripts/exportLovdata.ts",
+    "import-lovdata": "tsx scripts/importLovdata.ts",
+    "upload-lovdata-storage": "tsx scripts/uploadLovdataStorage.ts",
+    "create-supabase-users": "tsx scripts/createSupabaseUsers.ts",
+    "verify-supabase-migration": "tsx scripts/verifySupabaseMigration.ts",
+    "sync-archives": "tsx scripts/syncArchives.ts",
+    "lint": "eslint --ext .ts src",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "@supabase/supabase-js": "^2.46.1",
+    "pino": "^9.2.0",
+    "prom-client": "^15.1.0",
+    "tar-stream": "^3.1.6",
+    "unbzip2-stream": "^1.4.3",
+    "unzipper": "^0.11.6",
+    "openai": "^4.58.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/unzipper": "^0.10.10",
+    "@types/tar-stream": "^3.1.2",
+    "@types/supertest": "^2.0.12",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    "eslint": "^8.57.1",
+    "pino-pretty": "^11.2.2",
+    "tsx": "^4.16.2",
+    "typescript": "^5.6.3",
+    "supertest": "^6.3.4",
+    "vitest": "^1.6.0"
+  }
+}

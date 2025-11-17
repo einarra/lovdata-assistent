@@ -1,0 +1,3 @@
+# Denne applikasjonen kjører på Node.js/TypeScript (backend) og React/Vite (frontend).
+# Ingen Python-avhengigheter er nødvendig. Filen beholdes for kompatibilitet, men kan slettes
+# dersom prosjektet ikke trenger pip/requirements-støtte.
