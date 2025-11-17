@@ -11,6 +11,10 @@
     {
       "source": "/vite.svg",
       "destination": "/public/vite.svg"
+    },
+    {
+      "source": "/((?!api|assets|vite.svg).*)",
+      "destination": "/public/index.html"
     }
   ],
   "functions": {
