@@ -157,8 +157,26 @@ export default async function handler(req, res) {
       console.log(`[API] Request object type: ${typeof req}, has method: ${!!req.method}, has url: ${!!req.url}`);
       console.log(`[API] Response object type: ${typeof res}, has status: ${typeof res.status === 'function'}, has json: ${typeof res.json === 'function'}`);
       
+      // Ensure request has all properties Express expects
+      // Vercel's req/res should be compatible, but let's be explicit
+      if (!req.headers) {
+        req.headers = {};
+      }
+      if (!req.query) {
+        req.query = {};
+      }
+      if (!req.body) {
+        req.body = {};
+      }
+      if (!req.params) {
+        req.params = {};
+      }
+      
+      console.log(`[API] About to call app(), req properties: method=${req.method}, url=${req.url}, path=${req.path}`);
+      
       try {
-        app(req, res, (err) => {
+        const result = app(req, res, (err) => {
+          console.log(`[API] Express callback invoked! err=${err ? err.message : 'none'}, headersSent=${res.headersSent}`);
         clearTimeout(timeout);
         console.log(`[API] app() callback called, err: ${err ? err.message : 'none'}, headersSent: ${res.headersSent}`);
         if (err) {
@@ -191,6 +209,8 @@ export default async function handler(req, res) {
           // The res.end wrapper will call resolve
         }
       });
+      
+      console.log(`[API] app() call completed, result: ${result}, type: ${typeof result}`);
       } catch (expressError) {
         clearTimeout(timeout);
         console.error('[API] Error calling Express app:', expressError);
