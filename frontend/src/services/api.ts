@@ -95,16 +95,30 @@ class ApiService {
     const clonedResponse = response.clone();
     const contentType = response.headers.get('content-type');
     
+    // Check content type first
     if (!contentType || !contentType.includes('application/json')) {
       const text = await clonedResponse.text();
-      throw new Error(`Expected JSON but got ${contentType || 'unknown'}. Response: ${text.substring(0, 100)}`);
+      const preview = text.trim().substring(0, 100);
+      throw new Error(`Expected JSON but got ${contentType || 'unknown'}. Response preview: ${preview}`);
+    }
+    
+    // Get text first to check if it's empty or malformed
+    const text = await response.text();
+    const trimmed = text.trim();
+    
+    if (!trimmed) {
+      throw new Error('Received empty response body');
+    }
+    
+    // Check if it looks like HTML
+    if (trimmed.startsWith('<!') || trimmed.startsWith('<html')) {
+      throw new Error(`Received HTML instead of JSON. Preview: ${trimmed.substring(0, 100)}`);
     }
     
     try {
-      return await response.json();
+      return JSON.parse(trimmed) as T;
     } catch (error) {
-      const text = await clonedResponse.text();
-      throw new Error(`Failed to parse JSON: ${error instanceof Error ? error.message : String(error)}. Response: ${text.substring(0, 100)}`);
+      throw new Error(`Failed to parse JSON: ${error instanceof Error ? error.message : String(error)}. Response preview: ${trimmed.substring(0, 100)}`);
     }
   }
   
