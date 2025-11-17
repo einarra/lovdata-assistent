@@ -65,7 +65,10 @@ VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_ANON_KEY=your-anon-key
 ```
 
-**Note:** In production, `VITE_API_URL` should be `/api` (relative path) so it uses the same domain.
+**Note:** 
+- `VITE_API_URL` should be set to `/api` (relative path) in production
+- If `VITE_API_URL` is not set, the app will automatically use `/api` in production builds
+- These variables are embedded at build time, so set them before deploying
 
 ## Deployment Steps
 
