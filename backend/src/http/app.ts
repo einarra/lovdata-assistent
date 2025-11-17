@@ -40,6 +40,21 @@ export function createApp() {
   const app = express();
   const currentDir = path.dirname(fileURLToPath(import.meta.url));
   const assetsDir = path.join(currentDir, '..', '..', 'public');
+  
+  // Log registered routes for debugging (in serverless environments)
+  if (process.env.VERCEL || process.cwd().startsWith('/var/task')) {
+    // Log routes after they're registered (we'll add this after route registration)
+    process.nextTick(() => {
+      const routes: string[] = [];
+      app._router?.stack?.forEach((middleware: any) => {
+        if (middleware.route) {
+          const methods = Object.keys(middleware.route.methods).join(',').toUpperCase();
+          routes.push(`${methods} ${middleware.route.path}`);
+        }
+      });
+      logger.info({ routes }, 'Registered Express routes');
+    });
+  }
 
   app.use(
     cors({
