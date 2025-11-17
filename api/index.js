@@ -95,6 +95,8 @@ export default async function handler(req, res) {
     }
     
     console.log(`[API] Final path: ${path}`);
+    console.log(`[API] Request method: ${req.method}`);
+    console.log(`[API] Request headers:`, JSON.stringify(req.headers, null, 2));
     
     // Vercel's req/res are compatible with Express
     // Use the Express app to handle the request
