@@ -98,14 +98,22 @@ export default async function handler(req, res) {
       app(req, res, (err) => {
         if (err) {
           console.error('Express error:', err);
+          console.error('Express error stack:', err.stack);
           if (!res.headersSent) {
-            res.status(500).json({ error: 'Internal server error', message: err.message });
+            const statusCode = err.statusCode || err.status || 500;
+            res.status(statusCode).json({ 
+              error: 'Internal server error', 
+              message: err.message,
+              ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
+            });
           }
-          reject(err);
+          resolve(); // Don't reject, just resolve after sending error
         } else if (!res.headersSent) {
           // If Express didn't send a response, send 404
           res.status(404).json({ error: 'Not found', path: req.url });
           resolve();
+        } else {
+          resolve(); // Response was sent, resolve
         }
       });
     });
