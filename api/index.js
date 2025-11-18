@@ -237,7 +237,34 @@ export default async function handler(req, res) {
       if (!req.query) {
         req.query = {};
       }
-      if (!req.body) {
+      // CRITICAL: Handle request body for Vercel serverless functions
+      // Vercel typically provides req.body as already parsed JSON (if content-type is JSON)
+      // OR as a string/Buffer that needs parsing
+      // Express's json() middleware expects a readable stream, which Vercel doesn't provide
+      // So we need to handle body parsing ourselves if Vercel hasn't already done it
+      if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
+        const contentType = req.headers['content-type'] || '';
+        if (contentType.includes('application/json')) {
+          // If body is a string, parse it (Vercel sometimes provides it as string)
+          if (typeof req.body === 'string' && req.body.length > 0) {
+            try {
+              req.body = JSON.parse(req.body);
+              console.log('[API] Parsed JSON body from string');
+            } catch (parseError) {
+              console.error('[API] Failed to parse JSON body:', parseError);
+              // Set to empty object so Express doesn't crash
+              req.body = {};
+            }
+          } else if (req.body === undefined || req.body === null) {
+            // Vercel should provide the body, but if it doesn't, we can't read from stream
+            // Set to empty object - the route handler will handle missing body
+            req.body = {};
+            console.warn('[API] Request body is missing for', req.method, req.url);
+          }
+          // If body is already an object, leave it as is (Vercel already parsed it)
+        }
+      } else if (!req.body) {
+        // For non-body methods (GET, DELETE, etc.), safe to initialize as empty object
         req.body = {};
       }
       if (!req.params) {
