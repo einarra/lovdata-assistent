@@ -144,6 +144,15 @@ export function createApp() {
     }
   });
 
+  // Handle GET requests to POST-only routes with a helpful error
+  app.get('/assistant/run', (_req: Request, res: Response) => {
+    res.status(405).json({
+      error: 'Method Not Allowed',
+      message: 'This endpoint only accepts POST requests',
+      hint: 'The request was sent as GET instead of POST. Check that the frontend is using method: "POST" in the fetch call.'
+    });
+  });
+
   app.get('/session', requireSupabaseAuth, async (req: Request, res: Response, next: NextFunction) => {
     try {
       const authReq = req as AuthenticatedRequest;

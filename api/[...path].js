@@ -76,6 +76,37 @@ export default async function catchAllHandler(req, res) {
     });
   }
   
+  // WARNING: Detect when a POST route receives GET (common issue)
+  const postRoutes = ['/assistant/run', '/skills/run'];
+  if (postRoutes.includes(path)) {
+    if (req.method === 'GET') {
+      console.error('[CatchAll] ERROR: POST route received GET request!', {
+        path: path,
+        method: req.method,
+        originalMethod: originalMethod,
+        url: req.url,
+        query: req.query,
+        headers: {
+          ...req.headers,
+          'content-type': req.headers['content-type'],
+          'content-length': req.headers['content-length'],
+          'authorization': req.headers.authorization ? 'present' : 'missing'
+        },
+        hasBody: !!req.body,
+        bodyType: typeof req.body,
+        bodyPreview: req.body ? JSON.stringify(req.body).substring(0, 100) : 'none'
+      });
+    } else {
+      console.log('[CatchAll] POST route received correctly:', {
+        path: path,
+        method: req.method,
+        hasBody: !!req.body,
+        contentType: req.headers['content-type'],
+        contentLength: req.headers['content-length']
+      });
+    }
+  }
+  
   // Don't delete query params here - let the main handler use them if needed
   // The main handler will use req.url which we've already set correctly
   
