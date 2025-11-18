@@ -13,7 +13,25 @@ export interface AuthenticatedRequest extends Request {
 export async function requireSupabaseAuth(req: Request, res: Response, next: NextFunction) {
   try {
     const authHeader = req.headers.authorization;
+    
+    // Log auth attempt for debugging (always log in Vercel)
+    if (process.env.VERCEL || process.env.NODE_ENV === 'development') {
+      logger.info({
+        path: req.path,
+        method: req.method,
+        hasAuthHeader: !!authHeader,
+        authHeaderPrefix: authHeader?.substring(0, 20) || 'missing'
+      }, 'Auth middleware: checking authorization');
+    }
+    
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      logger.warn({
+        path: req.path,
+        method: req.method,
+        hasAuthHeader: !!authHeader,
+        authHeaderValue: authHeader ? 'present but invalid format' : 'missing'
+      }, 'Auth failed: Authorization header missing or invalid format');
+      
       res.status(401).json({ 
         message: 'Authorization header missing',
         hint: 'Include Authorization header with format: Bearer <token>'
@@ -31,6 +49,17 @@ export async function requireSupabaseAuth(req: Request, res: Response, next: Nex
     }
 
     const { payload } = await verifySupabaseJwt(token);
+    
+    // Log successful auth
+    if (process.env.VERCEL || process.env.NODE_ENV === 'development') {
+      logger.info({
+        path: req.path,
+        method: req.method,
+        userId: payload.sub,
+        hasRole: !!payload.role
+      }, 'Auth successful');
+    }
+    
     (req as AuthenticatedRequest).auth = {
       userId: payload.sub,
       role: typeof payload.role === 'string' ? payload.role : undefined,

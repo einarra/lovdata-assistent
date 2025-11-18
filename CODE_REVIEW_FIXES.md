@@ -64,6 +64,21 @@ From logs, these routes are registered correctly:
 - ✅ `GET /session`
 - ✅ `GET /documents/xml`
 
+## Environment Variables for Vercel
+
+### Required Variables (Backend)
+- `SUPABASE_URL` - Supabase project URL
+- `SUPABASE_SERVICE_ROLE_KEY` - Supabase service role key (for server-side operations)
+- `OPENAI_API_KEY` - OpenAI API key for the agent
+
+### Required Variables (Frontend)
+- `VITE_SUPABASE_URL` - Supabase project URL (same as backend)
+- `VITE_SUPABASE_ANON_KEY` - Supabase anonymous key (for client-side auth)
+
+### NOT Needed in Vercel
+- ❌ `PORT` - Only used for local development. Serverless functions don't listen on ports.
+- ❌ `NODE_ENV` - Vercel sets this automatically to `production`
+
 ## Next Steps
 
 1. **Deploy the body parsing fix**
@@ -72,11 +87,7 @@ From logs, these routes are registered correctly:
    - Method received (should be POST)
    - Body present and parsed correctly
    - Authentication header present
-4. **Verify Vercel environment variables:**
-   - `SUPABASE_URL`
-   - `SUPABASE_SERVICE_ROLE_KEY`
-   - `VITE_SUPABASE_URL` (for frontend)
-   - `VITE_SUPABASE_ANON_KEY` (for frontend)
+4. **Verify Vercel environment variables** (see above)
 5. **Check browser Network tab:**
    - Request method is POST
    - Request includes Authorization header
