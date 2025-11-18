@@ -179,14 +179,26 @@ class ApiService {
       throw new Error('Authentication token is required. Please log in again.');
     }
 
-    const response = await fetch(`${this.baseUrl}/assistant/run`, {
+    const url = `${this.baseUrl}/assistant/run`;
+    const requestOptions = {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`
       },
       body: JSON.stringify(payload)
+    };
+    
+    // Log the request for debugging
+    console.log('[Frontend] Making POST request to:', url, {
+      method: requestOptions.method,
+      hasBody: !!requestOptions.body,
+      bodyLength: requestOptions.body.length,
+      hasAuth: !!requestOptions.headers.Authorization,
+      contentType: requestOptions.headers['Content-Type']
     });
+
+    const response = await fetch(url, requestOptions);
 
     if (!response.ok) {
       let errorMessage = `Assistant run failed: ${response.statusText}`;
