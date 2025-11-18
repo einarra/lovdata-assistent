@@ -30,6 +30,11 @@ export default async function catchAllHandler(req, res) {
   req.path = path;
   req.originalUrl = req.originalUrl || '/api' + path;
   
+  // Ensure method is preserved (Vercel should set this, but be safe)
+  if (!req.method) {
+    req.method = 'GET';
+  }
+  
   // Also clean up query params so the main handler doesn't try to use them
   if (req.query) {
     delete req.query['...path'];

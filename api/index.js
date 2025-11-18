@@ -89,6 +89,7 @@ export default async function handler(req, res) {
     
     // Ensure request has all necessary properties for Express
     // Vercel's req/res should be compatible, but let's make sure
+    // Preserve method - only set default if truly missing
     if (!req.method) {
       req.method = 'GET';
     }
@@ -155,7 +156,10 @@ export default async function handler(req, res) {
       }
       
       // Express expects certain properties on the request
-      req.method = req.method || 'GET';
+      // Preserve the original method - don't override it
+      if (!req.method) {
+        req.method = 'GET';
+      }
       req.url = req.url || path;
       req.path = req.path || path;
       req.originalUrl = req.originalUrl || '/api' + path;
@@ -193,8 +197,20 @@ export default async function handler(req, res) {
               resolve();
             }
           } else if (!res.headersSent) {
-            // If Express didn't send a response, send 404
-            res.status(404).json({ error: 'Not found', path: req.url, method: req.method });
+            // If Express didn't send a response, send 404 with debug info in development
+            const errorResponse = { 
+              error: 'Not found', 
+              path: req.url, 
+              method: req.method 
+            };
+            if (process.env.NODE_ENV === 'development') {
+              errorResponse.debug = {
+                originalUrl: req.originalUrl,
+                path: req.path,
+                baseUrl: req.baseUrl
+              };
+            }
+            res.status(404).json(errorResponse);
             if (!responseEnded) {
               responseEnded = true;
               resolve();
@@ -208,7 +224,8 @@ export default async function handler(req, res) {
         if (!res.headersSent) {
           res.status(500).json({ 
             error: 'Failed to process request', 
-            message: expressError.message 
+            message: expressError.message,
+            ...(process.env.NODE_ENV === 'development' && { stack: expressError.stack })
           });
         }
         if (!responseEnded) {
