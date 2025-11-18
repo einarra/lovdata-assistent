@@ -175,23 +175,39 @@ class ApiService {
   }
 
   async assistantRun(payload: AssistantRunRequest, token?: string): Promise<AssistantRunResponse> {
+    if (!token) {
+      throw new Error('Authentication token is required. Please log in again.');
+    }
+
     const response = await fetch(`${this.baseUrl}/assistant/run`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {})
+        Authorization: `Bearer ${token}`
       },
       body: JSON.stringify(payload)
     });
 
     if (!response.ok) {
       let errorMessage = `Assistant run failed: ${response.statusText}`;
+      let errorHint: string | undefined;
       try {
         const errorData = await this.parseErrorResponse(response);
         errorMessage = errorData.message || errorData.detail || errorMessage;
+        errorHint = errorData.hint;
       } catch {
         // If parsing fails, use status text
       }
+      
+      // Provide helpful error messages for common issues
+      if (response.status === 401) {
+        if (errorHint) {
+          errorMessage = `${errorMessage}. ${errorHint}`;
+        } else {
+          errorMessage = 'Authentication failed. Please log in again.';
+        }
+      }
+      
       throw new Error(errorMessage);
     }
 

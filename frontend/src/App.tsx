@@ -108,7 +108,19 @@ function App() {
       setError(null);
 
       try {
-        const response = await apiService.assistantRun({ question: trimmed }, accessToken);
+        // Ensure we have a fresh token before making the request
+        let token = accessToken;
+        if (supabase && session) {
+          // Refresh session to get latest token
+          const { data: { session: freshSession } } = await supabase.auth.getSession();
+          token = freshSession?.access_token ?? accessToken;
+        }
+        
+        if (!token) {
+          throw new Error('Du må være innlogget for å sende meldinger.');
+        }
+
+        const response = await apiService.assistantRun({ question: trimmed }, token);
         const assistantMessage: Message = {
           id: `assistant-${Date.now()}`,
           role: 'assistant',
@@ -133,7 +145,7 @@ function App() {
         setIsLoading(false);
       }
     },
-    [accessToken],
+    [accessToken, session, supabase],
   );
 
   if (!supabaseReady) {
