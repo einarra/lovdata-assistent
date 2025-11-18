@@ -145,14 +145,19 @@ export default async function handler(req, res) {
       req.originalUrl = '/api' + path;
     }
     
-    // Debug logging in development
-    if (process.env.NODE_ENV === 'development') {
+    // Debug logging in development and Vercel
+    if (process.env.NODE_ENV === 'development' || process.env.VERCEL) {
       console.log('[API] Path reconstruction:', {
         originalUrl: req.originalUrl,
         url: req.url,
         path: req.path,
         method: req.method,
-        query: req.query
+        incomingMethod: req.method || req.headers['x-http-method-override'] || 'UNKNOWN',
+        query: req.query,
+        headers: {
+          'content-type': req.headers['content-type'],
+          'authorization': req.headers.authorization ? 'present' : 'missing'
+        }
       });
     }
     
