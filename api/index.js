@@ -124,18 +124,18 @@ export default async function handler(req, res) {
     // Otherwise, we need to reconstruct it
     let path = req.url || req.path || '/';
     
-    // If path starts with /api, strip it (direct call to index.js)
-    if (path.startsWith('/api')) {
+    // Check if this came from the catch-all handler (has ...path in query)
+    // The catch-all handler should have already set req.url, but check query as fallback
+    if (req.query && (req.query['...path'] || req.query.path)) {
+      const pathParam = req.query['...path'] || req.query.path;
+      if (Array.isArray(pathParam)) {
+        path = '/' + pathParam.join('/');
+      } else if (typeof pathParam === 'string' && pathParam.length > 0) {
+        path = pathParam.startsWith('/') ? pathParam : '/' + pathParam;
+      }
+    } else if (path.startsWith('/api')) {
+      // Direct call to index.js with /api prefix - strip it
       path = path.replace(/^\/api/, '') || '/';
-    }
-    
-    // If we have query.path (from catch-all that didn't set it), use that
-    // But catch-all should have already set req.url, so this is a fallback
-    if (req.query && req.query.path && (path === '/' || path === '')) {
-      const pathSegments = Array.isArray(req.query.path) 
-        ? req.query.path 
-        : [req.query.path];
-      path = '/' + pathSegments.join('/');
     }
     
     // Update all path-related properties
@@ -145,9 +145,21 @@ export default async function handler(req, res) {
       req.originalUrl = '/api' + path;
     }
     
+    // Debug logging in development
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[API] Path reconstruction:', {
+        originalUrl: req.originalUrl,
+        url: req.url,
+        path: req.path,
+        method: req.method,
+        query: req.query
+      });
+    }
+    
     // Ensure request has all necessary properties for Express
     // Vercel's req/res should be compatible, but let's make sure
-    // Preserve method - only set default if truly missing
+    // CRITICAL: Preserve the HTTP method - don't override if it's already set
+    // Only set default if method is truly missing (shouldn't happen with Vercel)
     if (!req.method) {
       req.method = 'GET';
     }
@@ -255,17 +267,23 @@ export default async function handler(req, res) {
               resolve();
             }
           } else if (!res.headersSent) {
-            // If Express didn't send a response, send 404 with debug info in development
+            // If Express didn't send a response, send 404 with debug info
             const errorResponse = { 
               error: 'Not found', 
               path: req.url, 
-              method: req.method 
+              method: req.method,
+              originalUrl: req.originalUrl,
+              reconstructedPath: req.path
             };
-            if (process.env.NODE_ENV === 'development') {
+            // Always include debug info to help diagnose routing issues
+            if (process.env.NODE_ENV === 'development' || process.env.VERCEL) {
               errorResponse.debug = {
-                originalUrl: req.originalUrl,
-                path: req.path,
-                baseUrl: req.baseUrl
+                baseUrl: req.baseUrl,
+                query: req.query,
+                headers: {
+                  'content-type': req.headers['content-type'],
+                  'authorization': req.headers.authorization ? 'present' : 'missing'
+                }
               };
             }
             res.status(404).json(errorResponse);

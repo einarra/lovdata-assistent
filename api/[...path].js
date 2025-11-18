@@ -30,16 +30,15 @@ export default async function catchAllHandler(req, res) {
   req.path = path;
   req.originalUrl = req.originalUrl || '/api' + path;
   
-  // Ensure method is preserved (Vercel should set this, but be safe)
+  // CRITICAL: Preserve the HTTP method - don't default to GET
+  // Vercel should set this, but ensure it's preserved for POST/PUT/DELETE etc.
+  // Only set default if method is truly missing (shouldn't happen)
   if (!req.method) {
     req.method = 'GET';
   }
   
-  // Also clean up query params so the main handler doesn't try to use them
-  if (req.query) {
-    delete req.query['...path'];
-    delete req.query.path;
-  }
+  // Don't delete query params here - let the main handler use them if needed
+  // The main handler will use req.url which we've already set correctly
   
   // Call the main handler
   return handler(req, res);
