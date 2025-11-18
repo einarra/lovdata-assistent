@@ -5,16 +5,23 @@ import handler from './index.js';
 
 // Export handler that reconstructs the path from Vercel's path parameter
 export default async function catchAllHandler(req, res) {
+  // Log EVERY request at the entry point - this is critical for debugging
+  console.log('[API/[...path].js] Catch-all entry point:', {
+    method: req.method,
+    url: req.url,
+    path: req.path,
+    originalUrl: req.originalUrl,
+    query: req.query,
+    '...path': req.query['...path'],
+    headers: {
+      'content-type': req.headers['content-type'],
+      'authorization': req.headers.authorization ? 'present' : 'missing',
+      'x-http-method-override': req.headers['x-http-method-override']
+    }
+  });
+  
   // Log the incoming request method for debugging
   const incomingMethod = req.method || req.headers['x-http-method-override'] || 'UNKNOWN';
-  if (process.env.NODE_ENV === 'development' || process.env.VERCEL) {
-    console.log('[CatchAll] Incoming request:', {
-      method: incomingMethod,
-      url: req.url,
-      path: req.path,
-      query: req.query
-    });
-  }
   
   // Vercel provides path segments in req.query['...path'] (with three dots) for catch-all routes
   // For /api/health, req.query['...path'] = 'health'

@@ -77,6 +77,20 @@ async function initializeApp() {
 
 // Export the handler for Vercel
 export default async function handler(req, res) {
+  // Log EVERY request at the entry point to see what Vercel is sending
+  console.log('[API/index.js] Entry point:', {
+    method: req.method,
+    url: req.url,
+    path: req.path,
+    originalUrl: req.originalUrl,
+    query: req.query,
+    headers: {
+      'content-type': req.headers['content-type'],
+      'authorization': req.headers.authorization ? 'present' : 'missing',
+      'x-http-method-override': req.headers['x-http-method-override']
+    }
+  });
+  
   // Quick health check that doesn't require backend initialization
   const path = (req.url || req.path || '/').replace(/^\/api/, '') || '/';
   if (path === '/health' && req.method === 'GET') {
