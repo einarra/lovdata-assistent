@@ -129,17 +129,63 @@ export function createApp() {
 
   app.post('/assistant/run', requireSupabaseAuth, async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const payload = assistantSchema.parse(req.body ?? {});
+      // Log request details for debugging
+      logger.info({
+        path: req.path,
+        method: req.method,
+        hasBody: !!req.body,
+        bodyType: typeof req.body,
+        bodyKeys: req.body ? Object.keys(req.body) : [],
+        contentType: req.headers['content-type']
+      }, 'Assistant run: request received');
+      
       const authReq = req as AuthenticatedRequest;
       const userId = authReq.auth?.userId;
+      
+      if (!userId) {
+        logger.warn({ path: req.path }, 'Assistant run: userId missing after auth');
+        res.status(401).json({ message: 'User ID not found in authentication' });
+        return;
+      }
+      
+      // Parse and validate payload
+      let payload;
+      try {
+        payload = assistantSchema.parse(req.body ?? {});
+        logger.info({
+          questionLength: payload.question.length,
+          hasPage: !!payload.page,
+          hasPageSize: !!payload.pageSize,
+          locale: payload.locale
+        }, 'Assistant run: payload validated');
+      } catch (parseError) {
+        logger.error({ err: parseError, body: req.body }, 'Assistant run: payload validation failed');
+        throw parseError;
+      }
+      
+      // Execute assistant run
       const output = await timeOperation(
         'assistant_run',
         () => runAssistant(payload, userId ? { userId } : undefined),
         logger,
         { endpoint: '/assistant/run', userId, questionLength: payload.question.length }
       );
+      
+      logger.info({
+        answerLength: output.answer.length,
+        evidenceCount: output.evidence.length,
+        usedAgent: output.metadata.usedAgent
+      }, 'Assistant run: completed successfully');
+      
       res.json(output);
     } catch (error) {
+      logger.error({ 
+        err: error,
+        path: req.path,
+        method: req.method,
+        hasBody: !!req.body,
+        bodyType: typeof req.body
+      }, 'Assistant run: error occurred');
       next(error);
     }
   });

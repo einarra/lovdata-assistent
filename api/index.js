@@ -296,10 +296,26 @@ export default async function handler(req, res) {
         clearInterval(checkExpressResponse);
       }, 1000);
       
+      // Log before calling Express
+      console.log('[API/index.js] About to call Express app:', {
+        method: req.method,
+        url: req.url,
+        path: req.path,
+        originalUrl: req.originalUrl,
+        hasBody: !!req.body,
+        bodyType: typeof req.body
+      });
+      
       try {
         app(req, res, (err) => {
           clearTimeout(timeout);
           if (err) {
+            console.error('[API/index.js] Express error handler called:', {
+              error: err.message,
+              statusCode: err.statusCode || err.status,
+              path: req.path,
+              method: req.method
+            });
             if (!res.headersSent) {
               const statusCode = err.statusCode || err.status || 500;
               res.status(statusCode).json({ 
@@ -314,6 +330,12 @@ export default async function handler(req, res) {
             }
           } else if (!res.headersSent) {
             // If Express didn't send a response, send 404 with debug info
+            console.warn('[API/index.js] Express did not send response - route not found:', {
+              method: req.method,
+              url: req.url,
+              path: req.path,
+              originalUrl: req.originalUrl
+            });
             const errorResponse = { 
               error: 'Not found', 
               path: req.url, 
@@ -337,6 +359,12 @@ export default async function handler(req, res) {
               responseEnded = true;
               resolve();
             }
+          } else {
+            console.log('[API/index.js] Express sent response successfully:', {
+              method: req.method,
+              path: req.path,
+              statusCode: res.statusCode
+            });
           }
           // Response was sent, wait for it to end
           // The res.end wrapper will call resolve
