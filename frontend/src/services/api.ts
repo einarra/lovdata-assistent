@@ -123,7 +123,7 @@ class ApiService {
   }
   
   // Helper to safely parse error responses (response body can only be read once)
-  private async parseErrorResponse(response: Response): Promise<{ message?: string; detail?: string }> {
+  private async parseErrorResponse(response: Response): Promise<{ message?: string; detail?: string; hint?: string }> {
     const contentType = response.headers.get('content-type');
     if (contentType && contentType.includes('application/json')) {
       try {
