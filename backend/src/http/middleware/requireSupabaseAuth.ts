@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import { verifySupabaseJwt } from '../../auth/verifySupabaseJwt.js';
+import { logger } from '../../logger.js';
 
 export interface AuthenticatedRequest extends Request {
   auth?: {
@@ -31,8 +32,7 @@ export async function requireSupabaseAuth(req: Request, res: Response, next: Nex
     };
     next();
   } catch (error) {
-    // eslint-disable-next-line no-console
-    console.warn('Supabase auth verification failed:', error);
+    logger.warn({ err: error }, 'Supabase auth verification failed');
     res.status(401).json({ message: 'Unauthorized' });
   }
 }

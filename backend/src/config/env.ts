@@ -2,34 +2,18 @@ import dotenv from 'dotenv';
 import { z } from 'zod';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { existsSync, writeFileSync, readFileSync } from 'fs';
+import { existsSync } from 'fs';
 
-// Write diagnostics to a file so we can always see them
-// In serverless environments (Vercel, AWS Lambda), filesystem is read-only except /tmp
+// Only write diagnostics in development or when DEBUG_ENV is set
+const isServerless = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.cwd().startsWith('/var/task');
+const shouldDiag = process.env.NODE_ENV === 'development' || process.env.DEBUG_ENV;
+
+// Write diagnostics only when needed
 function writeDiag(msg: string) {
-  // Check if we're in a serverless environment
-  const isServerless = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.cwd().startsWith('/var/task');
-  
-  // Always write to stderr (visible in logs)
-  process.stderr.write(`[DIAG] ${msg}\n`);
-  
-  // Only try to write to file if not in serverless environment
-  if (!isServerless) {
-    try {
-      const cwd = process.cwd();
-      const diagFile = path.join(cwd, 'env-debug.log');
-      const content = `${new Date().toISOString()}: ${msg}\n`;
-      writeFileSync(diagFile, content, { flag: 'a' });
-    } catch (e: unknown) {
-      // Silently ignore file write errors in serverless (expected)
-      // Error already logged to stderr above
-    }
+  if (shouldDiag) {
+    process.stderr.write(`[ENV] ${msg}\n`);
   }
 }
-
-writeDiag('ENV.TS MODULE LOADING');
-// Force output to stderr immediately - should be visible no matter what
-process.stderr.write('\n=== ENV.TS STARTING ===\n');
 
 // Resolve .env file path relative to the backend directory
 // Strategy: Find directory containing package.json, which is the backend root
@@ -71,73 +55,21 @@ if (existsSync(cwdEnvPath)) {
 
 // Load .env file if found, otherwise let dotenv search automatically
 // Use override: true to ensure .env values take precedence over existing process.env
-// ALWAYS write to stderr so these messages are visible even if stdout is captured
+// In serverless (Vercel), .env files don't exist - env vars come from platform
 const result = envPathToLoad 
   ? dotenv.config({ path: envPathToLoad, override: true })
   : dotenv.config({ override: true });
 
-// Write diagnostic info to file AND console
-writeDiag(`Attempting to load .env from: ${envPathToLoad || 'default search'}`);
-writeDiag(`Resolved backend dir: ${backendDir}`);
-writeDiag(`Checked path 1: ${envPath}`);
-writeDiag(`Checked path 2: ${cwdEnvPath}`);
-writeDiag(`Current working dir: ${process.cwd()}`);
-
-if (result.error) {
-  // In serverless environments, .env file doesn't exist (env vars are set in platform)
-  // This is expected and not an error
-  const isServerless = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.cwd().startsWith('/var/task');
-  if (!isServerless) {
-    writeDiag(`ERROR loading .env: ${result.error.message}`);
-  } else {
-    writeDiag(`INFO: .env file not found (expected in serverless environment, using platform env vars)`);
-  }
-} else if (result.parsed) {
+if (result.error && !isServerless && shouldDiag) {
+  writeDiag(`Error loading .env: ${result.error.message}`);
+} else if (result.parsed && shouldDiag) {
   const keyCount = Object.keys(result.parsed).length;
-  writeDiag(`✓ Loaded ${keyCount} vars from .env file`);
-  writeDiag(`OPENAI_API_KEY in parsed result: ${'OPENAI_API_KEY' in result.parsed}`);
-  if (result.parsed['OPENAI_API_KEY']) {
-    writeDiag(`✓ OPENAI_API_KEY found in parsed! Length: ${result.parsed['OPENAI_API_KEY'].length}`);
-  } else {
-    writeDiag(`✗ OPENAI_API_KEY NOT in parsed result`);
-    writeDiag(`First 10 keys loaded: ${Object.keys(result.parsed).slice(0, 10).join(', ')}`);
-  }
-} else {
-  writeDiag(`✗ No .env file found or parsed`);
+  writeDiag(`Loaded ${keyCount} vars from .env file`);
 }
 
-writeDiag(`process.env.OPENAI_API_KEY after load: ${process.env.OPENAI_API_KEY ? `EXISTS (length: ${process.env.OPENAI_API_KEY.length})` : 'MISSING'}`);
-
-// Verify that .env file was actually loaded and parsed
-if (envPathToLoad && result.parsed && Object.keys(result.parsed).length === 0) {
-  writeDiag(`⚠ WARNING: .env file exists at ${envPathToLoad} but appears to be empty or unparseable`);
+// Verify that .env file was actually loaded and parsed (only warn in development)
+if (envPathToLoad && result.parsed && Object.keys(result.parsed).length === 0 && shouldDiag) {
   console.warn(`[ENV] WARNING: .env file at ${envPathToLoad} exists but contains no parseable variables`);
-}
-
-// Always log the result for transparency
-if (result.error) {
-  console.error(`[ENV] ERROR: Failed to load .env file${envPathToLoad ? ` from ${envPathToLoad}` : ''}: ${result.error.message}`);
-} else if (result.parsed && Object.keys(result.parsed).length > 0) {
-  console.log(`[ENV] Successfully loaded ${Object.keys(result.parsed).length} environment variables from .env file${envPathToLoad ? ` (${envPathToLoad})` : ''}`);
-  // Immediately verify OPENAI_API_KEY was loaded
-  const openaiKeyInParsed = 'OPENAI_API_KEY' in result.parsed && result.parsed['OPENAI_API_KEY'];
-  const openaiKeyInProcessEnv = process.env.OPENAI_API_KEY;
-  
-  if (openaiKeyInParsed) {
-    console.log(`[ENV] ✓ OPENAI_API_KEY loaded successfully (length: ${result.parsed['OPENAI_API_KEY'].length})`);
-  } else if (openaiKeyInProcessEnv) {
-    console.warn(`[ENV] ⚠ OPENAI_API_KEY exists in process.env but was not in .env file (length: ${openaiKeyInProcessEnv.length})`);
-  } else {
-    console.error(`[ENV] ✗ OPENAI_API_KEY NOT FOUND in .env file${envPathToLoad ? ` at ${envPathToLoad}` : ''}`);
-    console.error(`[ENV] Checked path: ${envPath}`);
-    console.error(`[ENV] Checked path: ${cwdEnvPath}`);
-    // List what keys were actually loaded
-    const loadedKeys = Object.keys(result.parsed).slice(0, 10);
-    console.error(`[ENV] First 10 keys loaded: ${loadedKeys.join(', ')}`);
-  }
-} else if (!envPathToLoad) {
-  // Only warn if we explicitly looked for a file but didn't find one
-  console.error(`[ENV] ERROR: No .env file found. Tried: ${envPath}, ${cwdEnvPath}, and default dotenv search.`);
 }
 
 // Debug output if requested
@@ -210,39 +142,10 @@ if (!parsed.success) {
 
 const envData = parsed.data;
 
-// Always warn if OPENAI_API_KEY is missing (unless we're in test mode)
-if (!envData.OPENAI_API_KEY && envData.NODE_ENV !== 'test') {
-  writeDiag(`✗✗✗ CRITICAL: OPENAI_API_KEY is not set in envData. OpenAI agent will not be available.`);
-  writeDiag(`Checked .env file location: ${envPathToLoad || envPath || 'not found'}`);
-  writeDiag(`Current working directory: ${process.cwd()}`);
-  writeDiag(`Backend directory: ${backendDir}`);
-  writeDiag(`process.env.OPENAI_API_KEY: ${process.env.OPENAI_API_KEY ? `EXISTS (length: ${process.env.OPENAI_API_KEY.length})` : 'UNDEFINED'}`);
-  writeDiag(`envData.OPENAI_API_KEY: ${envData.OPENAI_API_KEY || 'UNDEFINED'}`);
-  writeDiag(`This means either: 1) .env file not loaded, 2) Key not in .env file, 3) Key is empty/whitespace, or 4) Zod schema filtered it out`);
-  
-  // Additional diagnostic: check if .env file exists and what it contains
-  if (envPathToLoad && existsSync(envPathToLoad)) {
-    try {
-      const content = readFileSync(envPathToLoad, 'utf-8');
-      const hasOpenAIKey = /^OPENAI_API_KEY\s*=/m.test(content);
-      writeDiag(`.env file exists and ${hasOpenAIKey ? 'CONTAINS' : 'DOES NOT CONTAIN'} OPENAI_API_KEY line`);
-      if (hasOpenAIKey) {
-        const match = content.match(/^OPENAI_API_KEY\s*=\s*(.*)$/m);
-        if (match) {
-          const value = match[1].trim();
-          writeDiag(`OPENAI_API_KEY value in file: ${value ? `EXISTS (length: ${value.length}, starts with: ${value.substring(0, 10)}...)` : 'EMPTY'}`);
-        }
-      }
-    } catch (e) {
-      writeDiag(`Could not read .env file for diagnostics: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  }
-} else if (envData.OPENAI_API_KEY) {
-  writeDiag(`✓ OPENAI_API_KEY successfully parsed into envData (length: ${envData.OPENAI_API_KEY.length})`);
+// Warn if OPENAI_API_KEY is missing (unless we're in test mode)
+if (!envData.OPENAI_API_KEY && envData.NODE_ENV !== 'test' && shouldDiag) {
+  console.warn('[ENV] OPENAI_API_KEY is not set. OpenAI agent will not be available.');
 }
-
-writeDiag('ENV.TS MODULE COMPLETE');
-process.stderr.write('=== ENV.TS COMPLETE ===\n\n');
 
 // Debug: Check parsed data
 if (process.env.DEBUG_ENV) {
