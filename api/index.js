@@ -27,16 +27,34 @@ async function initializeApp() {
         await initializeServerless();
       } catch (initError) {
         // Continue even if initialization fails - some endpoints may still work
-        if (process.env.NODE_ENV === 'development') {
-          console.error('Serverless initialization failed, continuing with basic app:', initError);
+        // Log error details for debugging
+        const errorMessage = initError instanceof Error ? initError.message : String(initError);
+        const errorStack = initError instanceof Error ? initError.stack : undefined;
+        console.error('Serverless initialization failed:', errorMessage);
+        if (errorStack && process.env.NODE_ENV === 'development') {
+          console.error('Stack:', errorStack);
         }
       }
       
       // Create the Express app after initialization (or even if it failed)
-      const { createApp } = await import('../backend/dist/http/app.js');
-      const app = createApp();
-      appInstance = app;
-      return app;
+      try {
+        const { createApp } = await import('../backend/dist/http/app.js');
+        const app = createApp();
+        appInstance = app;
+        return app;
+      } catch (importError) {
+        const errorMessage = importError instanceof Error ? importError.message : String(importError);
+        const errorStack = importError instanceof Error ? importError.stack : undefined;
+        console.error('Failed to import Express app:', errorMessage);
+        if (errorStack) {
+          console.error('Stack:', errorStack);
+        }
+        // Check if it's a module not found error
+        if (errorMessage.includes('Cannot find module') || errorMessage.includes('ENOENT')) {
+          throw new Error(`Backend not built. Missing: ${errorMessage}. Run 'npm run build' in the backend directory.`);
+        }
+        throw importError;
+      }
     } catch (error) {
       // Even if everything fails, try to create a minimal app
       try {
@@ -45,6 +63,9 @@ async function initializeApp() {
         appInstance = app;
         return app;
       } catch (fallbackError) {
+        // Log the original error for debugging
+        console.error('Initialization completely failed. Original error:', error);
+        console.error('Fallback also failed:', fallbackError);
         throw error; // Re-throw original error
       }
     }
@@ -56,9 +77,46 @@ async function initializeApp() {
 
 // Export the handler for Vercel
 export default async function handler(req, res) {
+  // Quick health check that doesn't require backend initialization
+  const path = (req.url || req.path || '/').replace(/^\/api/, '') || '/';
+  if (path === '/health' && req.method === 'GET') {
+    try {
+      const app = await initializeApp();
+      // If we got here, pass to Express
+    } catch (error) {
+      // Even if backend fails, return a basic health response
+      if (!res.headersSent) {
+        res.status(503).json({ 
+          status: 'degraded',
+          message: 'Backend not initialized',
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+      return;
+    }
+  }
+
   try {
     // Ensure app is initialized
-    const app = await initializeApp();
+    let app;
+    try {
+      app = await initializeApp();
+    } catch (initError) {
+      // If initialization fails completely, return a helpful error
+      const errorMessage = initError instanceof Error ? initError.message : String(initError);
+      console.error('App initialization failed:', errorMessage);
+      if (!res.headersSent) {
+        res.status(500).json({ 
+          error: 'Backend initialization failed', 
+          message: errorMessage,
+          hint: 'Check that backend/dist directory exists. Run "npm run build" in the backend directory.',
+          ...(process.env.NODE_ENV === 'development' && { 
+            stack: initError instanceof Error ? initError.stack : undefined 
+          })
+        });
+      }
+      return;
+    }
     
     // Handle path reconstruction
     // Vercel routes /api/* to this function, but Express expects paths without /api
