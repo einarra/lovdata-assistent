@@ -5,7 +5,7 @@
   "framework": null,
   "rewrites": [
     {
-      "source": "/((?!api|assets|.*\\.(svg|png|jpg|jpeg|gif|ico|webp|woff|woff2|ttf|eot|css|js|json|xml|txt)).*)",
+      "source": "/((?!api/).*)",
       "destination": "/public/index.html"
     }
   ],
