@@ -46,14 +46,21 @@ export class OpenAIAgent implements Agent {
       model: this.model
     }, 'OpenAIAgent.generate: starting API call');
 
-    // Add timeout to prevent hanging (30 seconds max)
-    const timeoutMs = 30000;
+    // Add timeout to prevent hanging (15 seconds max - keep it well under Vercel's limit)
+    const timeoutMs = 15000;
+    const startTime = Date.now();
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    const timeoutId = setTimeout(() => {
+      const elapsed = Date.now() - startTime;
+      console.log(`[OpenAIAgent] Timeout triggered after ${elapsed}ms`);
+      logger.error({ elapsedMs: elapsed, timeoutMs }, 'OpenAIAgent.generate: timeout triggered');
+      controller.abort();
+    }, timeoutMs);
 
     let response;
     try {
-      logger.info('OpenAIAgent.generate: calling OpenAI API');
+      console.log(`[OpenAIAgent] Starting API call, timeout: ${timeoutMs}ms`);
+      logger.info({ timeoutMs }, 'OpenAIAgent.generate: calling OpenAI API');
       response = await this.client.chat.completions.create(
         {
           model: this.model,
@@ -69,27 +76,49 @@ export class OpenAIAgent implements Agent {
         }
       );
       clearTimeout(timeoutId);
+      const elapsed = Date.now() - startTime;
+      console.log(`[OpenAIAgent] API call completed after ${elapsed}ms`);
       logger.info({ 
         hasResponse: !!response,
-        choicesCount: response?.choices?.length ?? 0
+        choicesCount: response?.choices?.length ?? 0,
+        elapsedMs: elapsed
       }, 'OpenAIAgent.generate: OpenAI API call completed');
     } catch (error) {
       clearTimeout(timeoutId);
+      const elapsed = Date.now() - startTime;
+      console.log(`[OpenAIAgent] API call failed after ${elapsed}ms:`, error instanceof Error ? error.message : String(error));
+      
       if (error instanceof Error && error.name === 'AbortError') {
-        logger.error({ timeoutMs }, 'OpenAIAgent.generate: API call timed out');
+        logger.error({ timeoutMs, elapsedMs: elapsed }, 'OpenAIAgent.generate: API call timed out');
         throw new Error(`OpenAI API call timed out after ${timeoutMs}ms`);
       }
       logger.error({ 
         err: error,
+        elapsedMs: elapsed,
         stack: error instanceof Error ? error.stack : undefined
       }, 'OpenAIAgent.generate: API call failed');
       throw error;
     }
 
     const raw = response.choices[0]?.message?.content ?? '';
+    console.log(`[OpenAIAgent] Response received, raw length: ${raw.length}`);
     logger.info({ rawLength: raw.length }, 'OpenAIAgent.generate: parsing response');
     
-    const parsed = parseAgentJson(raw);
+    let parsed;
+    try {
+      parsed = parseAgentJson(raw);
+      console.log(`[OpenAIAgent] Response parsed successfully, hasAnswer: ${!!parsed.answer}`);
+      logger.debug({ hasAnswer: !!parsed.answer }, 'OpenAIAgent.generate: JSON parsed');
+    } catch (parseError) {
+      console.log(`[OpenAIAgent] Parse error:`, parseError instanceof Error ? parseError.message : String(parseError));
+      logger.error({ err: parseError, raw }, 'OpenAIAgent.generate: failed to parse JSON response');
+      return {
+        answer: raw.trim() || 'Jeg klarte ikke å formulere et svar basert på kildene.',
+        citations: [],
+        model: this.model
+      };
+    }
+    
     if (!parsed.answer) {
       logger.warn({ raw }, 'OpenAI agent returned empty answer; falling back to raw text');
       return {
@@ -108,16 +137,20 @@ export class OpenAIAgent implements Agent {
           )
       : undefined;
 
+    console.log(`[OpenAIAgent] Finalizing response, answer length: ${parsed.answer.trim().length}, citations: ${citations?.length ?? 0}`);
     logger.info({ 
       answerLength: parsed.answer.trim().length,
       citationsCount: citations?.length ?? 0
     }, 'OpenAIAgent.generate: response parsed successfully');
 
-    return {
+    const result = {
       answer: parsed.answer.trim(),
       citations: citations ?? [],
       model: this.model
     };
+    
+    console.log(`[OpenAIAgent] Returning result, answer length: ${result.answer.length}`);
+    return result;
   }
 }
 
