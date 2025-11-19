@@ -327,17 +327,10 @@ export class SupabaseArchiveStore {
         
         // Add an additional timeout wrapper around the query itself
         // This ensures we catch hanging queries even if the outer Promise.race doesn't work
-        // Use 5 seconds to ensure timeout triggers well before any Vercel limits
-        const queryTimeoutMs = 5000; // 5 seconds for the query itself - aggressive to catch hangs early
+        // Use 4.5 seconds to ensure timeout triggers well before any Vercel limits
+        // (Vercel Hobby tier has 10s limit, so 4.5s gives us buffer)
+        const queryTimeoutMs = 4500; // 4.5 seconds for the query itself - aggressive to catch hangs early
         let queryTimeoutHandle: NodeJS.Timeout | null = null;
-        const queryTimeoutPromise = new Promise<never>((_, reject) => {
-          queryTimeoutHandle = setTimeout(() => {
-            const elapsed = Date.now() - queryStartTime;
-            console.log(`[SupabaseArchiveStore] INTERNAL TIMEOUT TRIGGERED after ${elapsed}ms (queryTimeoutMs: ${queryTimeoutMs})`);
-            this.logs.error({ elapsedMs: elapsed, queryTimeoutMs }, 'searchAsync: query execution timed out (internal timeout)');
-            reject(new Error(`Query execution timed out after ${queryTimeoutMs}ms`));
-          }, queryTimeoutMs);
-        });
         
         // Also add a safety check at 4 seconds to ensure we're still running
         setTimeout(() => {
@@ -376,20 +369,38 @@ export class SupabaseArchiveStore {
           console.log(`[SupabaseArchiveStore] Starting internal Promise.race, queryTimeoutMs: ${queryTimeoutMs}`);
           const internalRaceStartTime = Date.now();
           
+          // Create a timeout promise that resolves (not rejects) to make Promise.race work properly
+          const timeoutWrapperPromise = new Promise<{ type: 'timeout'; error: Error }>((resolve) => {
+            queryTimeoutHandle = setTimeout(() => {
+              const raceDuration = Date.now() - internalRaceStartTime;
+              const elapsed = Date.now() - queryStartTime;
+              console.log(`[SupabaseArchiveStore] INTERNAL TIMEOUT TRIGGERED after ${elapsed}ms (race: ${raceDuration}ms)`);
+              this.logs.error({ elapsedMs: elapsed, raceDurationMs: raceDuration, queryTimeoutMs }, 'searchAsync: query execution timed out (internal timeout)');
+              resolve({ 
+                type: 'timeout' as const, 
+                error: new Error(`Query execution timed out after ${queryTimeoutMs}ms`) 
+              });
+            }, queryTimeoutMs);
+          });
+          
           const internalRacePromise = Promise.race([
             queryExecutionPromise.then(result => {
               const raceDuration = Date.now() - internalRaceStartTime;
               console.log(`[SupabaseArchiveStore] INTERNAL RACE: Query won after ${raceDuration}ms`);
+              if (queryTimeoutHandle) {
+                clearTimeout(queryTimeoutHandle);
+              }
               return { type: 'success' as const, result };
             }),
-            queryTimeoutPromise.catch(err => {
+            timeoutWrapperPromise.then(timeoutResult => {
               const raceDuration = Date.now() - internalRaceStartTime;
               console.log(`[SupabaseArchiveStore] INTERNAL RACE: Timeout won after ${raceDuration}ms`);
               this.logs.info({ raceDurationMs: raceDuration, resolvedBy: 'timeout' }, 'searchAsync: internal Promise.race resolved - timeout won');
-              return { type: 'timeout' as const, error: err };
+              return timeoutResult;
             })
           ]);
           
+          console.log(`[SupabaseArchiveStore] Awaiting internal race result...`);
           const internalRaceResult = await internalRacePromise;
           
           if (internalRaceResult.type === 'timeout') {
