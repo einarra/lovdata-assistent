@@ -340,23 +340,54 @@ export class SupabaseArchiveStore {
       }
     })();
     
-    const timeoutPromise = new Promise<never>((_, reject) => {
+    const timeoutPromise = new Promise<{ type: 'timeout' }>((resolve) => {
       timeoutHandle = setTimeout(() => {
         const elapsed = Date.now() - queryStartTime;
         queryAborted = true;
         this.logs.warn({ elapsedMs: elapsed, timeoutMs }, 'searchAsync: timeout triggered');
-        reject(new Error(`Database query timed out after ${timeoutMs}ms`));
+        resolve({ type: 'timeout' });
       }, timeoutMs);
     });
     
     let data, error, count;
     try {
       this.logs.info('searchAsync: waiting for query result with timeout');
-      const result = await Promise.race([queryPromise, timeoutPromise]);
+      
+      // Use a wrapper that ensures timeout always triggers
+      const racePromise = Promise.race([
+        queryPromise.then(result => ({ type: 'success' as const, result })),
+        timeoutPromise.then(() => ({ type: 'timeout' as const }))
+      ]);
+      
+      // Add a safety check - log periodically to see if we're still waiting
+      const progressInterval = setInterval(() => {
+        const elapsed = Date.now() - queryStartTime;
+        this.logs.debug({ elapsedMs: elapsed }, 'searchAsync: still waiting for query');
+      }, 1000);
+      
+      const raceResult = await racePromise;
+      clearInterval(progressInterval);
+      
       if (timeoutHandle) {
         clearTimeout(timeoutHandle);
       }
+      
+      if (raceResult.type === 'timeout') {
+        const elapsed = Date.now() - queryStartTime;
+        this.logs.error({ 
+          elapsedMs: elapsed,
+          query, 
+          tsQuery, 
+          limit, 
+          offset 
+        }, 'searchAsync: timeout reached in Promise.race');
+        queryTimer.end({ success: false, error: 'timeout' });
+        searchTimer.end({ success: false, error: 'timeout' });
+        return { hits: [], total: 0 };
+      }
+      
       this.logs.info('searchAsync: Promise.race completed successfully');
+      const result = raceResult.result;
       data = result.data;
       error = result.error;
       count = result.count;
