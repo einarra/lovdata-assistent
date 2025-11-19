@@ -62,6 +62,12 @@ export class SerperClient {
       console.log(`[SerperClient] URL: ${this.baseUrl}, timeout: ${timeoutMs}ms`);
       console.log(`[SerperClient] About to call fetch with AbortController signal`);
       
+      // Add progress checks while waiting for fetch
+      const progressCheckInterval = setInterval(() => {
+        const elapsed = Date.now() - startTime;
+        console.log(`[SerperClient] Still waiting for response... elapsed: ${elapsed}ms, timeout at: ${timeoutMs}ms`);
+      }, 2000); // Check every 2 seconds
+      
       const fetchPromise = fetch(this.baseUrl, {
         method: 'POST',
         headers: {
@@ -70,10 +76,27 @@ export class SerperClient {
         },
         body: JSON.stringify(payload),
         signal: controller.signal
+      }).finally(() => {
+        // Clear progress checks when fetch completes (success or error)
+        clearInterval(progressCheckInterval);
       });
       
       console.log(`[SerperClient] Fetch promise created, awaiting response...`);
-      const response = await fetchPromise;
+      
+      // Wrap in Promise.race to ensure timeout always triggers
+      const responsePromise = fetchPromise;
+      const timeoutWrapper = new Promise<Response>((_, reject) => {
+        // The timeout is already handled by AbortController, but this ensures we catch it
+        setTimeout(() => {
+          const elapsed = Date.now() - startTime;
+          if (elapsed >= timeoutMs - 100) { // Give a 100ms buffer
+            console.log(`[SerperClient] Timeout wrapper triggered after ${elapsed}ms`);
+            reject(new Error(`Fetch timeout after ${timeoutMs}ms`));
+          }
+        }, timeoutMs + 100);
+      });
+      
+      const response = await Promise.race([responsePromise, timeoutWrapper]);
       
       clearTimeout(timeoutId);
       const elapsed = Date.now() - startTime;
@@ -92,8 +115,12 @@ export class SerperClient {
     } catch (error) {
       clearTimeout(timeoutId);
       const elapsed = Date.now() - startTime;
+      console.log(`[SerperClient] Catch block entered after ${elapsed}ms`);
       console.log(`[SerperClient] Error after ${elapsed}ms:`, error instanceof Error ? error.message : String(error));
       console.log(`[SerperClient] Error type: ${error instanceof Error ? error.name : typeof error}`);
+      if (error instanceof Error && error.stack) {
+        console.log(`[SerperClient] Error stack: ${error.stack.substring(0, 500)}`);
+      }
       
       if (error instanceof Error && error.name === 'AbortError') {
         console.log(`[SerperClient] AbortError detected, throwing timeout error`);
