@@ -423,18 +423,33 @@ export class SupabaseArchiveStore {
     }
     
     queryTimer.end({ resultCount: data?.length ?? 0, totalCount: count ?? 0 });
+    
+    this.logs.info({ 
+      hasData: !!data,
+      dataLength: data?.length ?? 0,
+      hasError: !!error,
+      count 
+    }, 'searchAsync: about to check for errors');
 
     if (error) {
       searchTimer.end({ success: false, error: error.message });
       this.logs.error({ err: error, query }, 'Failed to search documents');
+      this.logs.info('searchAsync: returning empty hits due to error');
       return { hits: [], total: 0 };
     }
+    
+    this.logs.info('searchAsync: no error, processing results');
 
     const total = count ?? 0;
+    this.logs.info({ total, dataLength: data?.length ?? 0 }, 'searchAsync: checking if results are empty');
+    
     if (total === 0 || !data || data.length === 0) {
       searchTimer.end({ hits: 0, total: 0 });
+      this.logs.info('searchAsync: returning empty results (no data)');
       return { hits: [], total: 0 };
     }
+    
+    this.logs.info({ dataLength: data.length, total }, 'searchAsync: processing non-empty results');
 
     // Generate snippets from content
     const snippetTimer = new Timer('generate_snippets', this.logs, { documentCount: data.length });
@@ -451,6 +466,12 @@ export class SupabaseArchiveStore {
     snippetTimer.end({ snippetCount: hits.length });
 
     searchTimer.end({ hits: hits.length, total });
+    
+    this.logs.info({ 
+      hitsCount: hits.length,
+      total
+    }, 'searchAsync: returning final results');
+
     return { hits, total };
   }
 
