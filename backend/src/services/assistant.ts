@@ -139,16 +139,22 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
         throw skillError;
       }
       
-      const { result: skillOutputResult } = skillOutput;
+      // skillOutput is { result: SkillOutput, runId: string } from withTrace
+      // SkillOutput has { result: any, meta?: any }
+      const skillOutputData = skillOutput.result;
       logger.info({ 
-        hasResult: !!skillOutputResult,
-        resultType: typeof skillOutputResult
+        hasResult: !!skillOutputData,
+        resultType: typeof skillOutputData,
+        hasResultField: skillOutputData && typeof skillOutputData === 'object' && 'result' in skillOutputData,
+        resultKeys: skillOutputData && typeof skillOutputData === 'object' ? Object.keys(skillOutputData) : []
       }, 'runAssistant: extracted skill result');
 
-      const result = (skillOutputResult ?? {}) as LovdataSkillSearchResult;
+      // Extract the actual result from SkillOutput
+      const result = (skillOutputData?.result ?? {}) as LovdataSkillSearchResult;
       logger.info({ 
         hasHits: Array.isArray(result.hits),
-        hitsCount: Array.isArray(result.hits) ? result.hits.length : 0
+        hitsCount: Array.isArray(result.hits) ? result.hits.length : 0,
+        resultKeys: result && typeof result === 'object' ? Object.keys(result) : []
       }, 'runAssistant: processed skill result');
       let serperSkillMeta: Record<string, unknown> | undefined;
 
