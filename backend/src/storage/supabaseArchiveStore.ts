@@ -291,10 +291,14 @@ export class SupabaseArchiveStore {
     
     this.logs.info({ tsQuery, limit, offset }, 'searchAsync: executing database query');
     
-    // Add timeout to prevent hanging (15 seconds max - Vercel functions have 60s limit)
-    const timeoutMs = 15000;
+    // Add timeout to prevent hanging (8 seconds max - Vercel Hobby has 10s limit, Pro has 60s)
+    // Using 8s to ensure timeout triggers before Vercel kills the function
+    const timeoutMs = 8000;
     let timeoutHandle: NodeJS.Timeout | null = null;
     let queryAborted = false;
+    const queryStartTime = Date.now();
+    
+    this.logs.info({ timeoutMs }, 'searchAsync: setting up query with timeout');
     
     const queryPromise = (async () => {
       try {
@@ -308,6 +312,9 @@ export class SupabaseArchiveStore {
           })
           .order('id', { ascending: true })
           .range(offset, offset + limit - 1);
+        
+        const queryDuration = Date.now() - queryStartTime;
+        this.logs.info({ queryDurationMs: queryDuration }, 'searchAsync: Supabase query promise resolved');
         
         if (queryAborted) {
           this.logs.warn('searchAsync: query completed but was already aborted');
@@ -323,8 +330,11 @@ export class SupabaseArchiveStore {
         
         return result;
       } catch (queryError) {
+        const queryDuration = Date.now() - queryStartTime;
         if (!queryAborted) {
-          this.logs.error({ err: queryError }, 'searchAsync: query error');
+          this.logs.error({ err: queryError, queryDurationMs: queryDuration }, 'searchAsync: query error');
+        } else {
+          this.logs.warn({ queryDurationMs: queryDuration }, 'searchAsync: query error (aborted)');
         }
         throw queryError;
       }
@@ -332,7 +342,9 @@ export class SupabaseArchiveStore {
     
     const timeoutPromise = new Promise<never>((_, reject) => {
       timeoutHandle = setTimeout(() => {
+        const elapsed = Date.now() - queryStartTime;
         queryAborted = true;
+        this.logs.warn({ elapsedMs: elapsed, timeoutMs }, 'searchAsync: timeout triggered');
         reject(new Error(`Database query timed out after ${timeoutMs}ms`));
       }, timeoutMs);
     });
@@ -344,16 +356,25 @@ export class SupabaseArchiveStore {
       if (timeoutHandle) {
         clearTimeout(timeoutHandle);
       }
+      this.logs.info('searchAsync: Promise.race completed successfully');
       data = result.data;
       error = result.error;
       count = result.count;
     } catch (timeoutError) {
+      const elapsed = Date.now() - queryStartTime;
       if (timeoutHandle) {
         clearTimeout(timeoutHandle);
       }
+      this.logs.error({ 
+        err: timeoutError, 
+        elapsedMs: elapsed,
+        query, 
+        tsQuery, 
+        limit, 
+        offset 
+      }, 'searchAsync: Promise.race rejected (timeout or error)');
       queryTimer.end({ success: false, error: timeoutError instanceof Error ? timeoutError.message : String(timeoutError) });
       searchTimer.end({ success: false, error: 'timeout' });
-      this.logs.error({ err: timeoutError, query, tsQuery, limit, offset }, 'Database query timed out');
       return { hits: [], total: 0 };
     }
     
