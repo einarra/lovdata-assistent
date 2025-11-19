@@ -596,6 +596,8 @@ export class SupabaseArchiveStore {
     const queryPromise = (async () => {
       try {
         this.logs.info({ filename, member }, 'getDocumentContentAsync: executing Supabase query');
+        const queryStartTime = Date.now();
+        
         const { data, error } = await this.supabase
           .from('lovdata_documents')
           .select('content')
@@ -604,7 +606,12 @@ export class SupabaseArchiveStore {
           .maybeSingle();
 
         const fetchDuration = Date.now() - fetchStartTime;
-        this.logs.info({ fetchDurationMs: fetchDuration, hasError: !!error, hasData: !!data }, 'getDocumentContentAsync: query completed');
+        this.logs.info({ 
+          fetchDurationMs: fetchDuration, 
+          hasError: !!error, 
+          hasData: !!data,
+          contentLength: data?.content?.length ?? 0
+        }, 'getDocumentContentAsync: query completed');
 
         if (error) {
           fetchTimer.end({ success: false, found: false, error: error.message });

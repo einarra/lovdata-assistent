@@ -508,8 +508,23 @@ async function updateLinksForHtmlContent(evidence: AgentEvidence[], services: Se
 
   // Add timeout for each document fetch (5 seconds per item)
   const documentFetchTimeoutMs = 5000;
+  const overallStartTime = Date.now();
   
-  const results = await Promise.all(
+  // Add overall timeout for all document fetches (30 seconds max for all items)
+  const overallTimeoutMs = 30000;
+  const overallTimeoutPromise = new Promise<never>((_, reject) => {
+    setTimeout(() => {
+      const elapsed = Date.now() - overallStartTime;
+      logger.error({ 
+        elapsedMs: elapsed, 
+        evidenceCount: evidence.length,
+        timeoutMs: overallTimeoutMs 
+      }, 'updateLinksForHtmlContent: overall timeout reached');
+      reject(new Error(`updateLinksForHtmlContent timed out after ${overallTimeoutMs}ms`));
+    }, overallTimeoutMs);
+  });
+  
+  const updatePromise = Promise.all(
     evidence.map(async (item, index) => {
       logger.debug({ index, evidenceId: item.id }, 'updateLinksForHtmlContent: processing item');
       
@@ -593,10 +608,27 @@ async function updateLinksForHtmlContent(evidence: AgentEvidence[], services: Se
     })
   );
   
-  logger.info({ 
-    processedCount: results.length,
-    inputCount: evidence.length
-  }, 'updateLinksForHtmlContent: completed');
+  // Race between Promise.all and overall timeout
+  let results;
+  try {
+    logger.info('updateLinksForHtmlContent: awaiting all document fetches with overall timeout');
+    results = await Promise.race([updatePromise, overallTimeoutPromise]);
+    const elapsed = Date.now() - overallStartTime;
+    logger.info({ 
+      processedCount: results.length,
+      inputCount: evidence.length,
+      elapsedMs: elapsed
+    }, 'updateLinksForHtmlContent: completed');
+  } catch (overallError) {
+    const elapsed = Date.now() - overallStartTime;
+    logger.error({ 
+      err: overallError,
+      elapsedMs: elapsed,
+      evidenceCount: evidence.length
+    }, 'updateLinksForHtmlContent: overall timeout or error, returning evidence as-is');
+    // Return evidence without HTML link updates if overall timeout occurs
+    return evidence;
+  }
   
   return results;
 }
