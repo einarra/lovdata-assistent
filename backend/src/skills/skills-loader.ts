@@ -93,22 +93,60 @@ function normaliseModuleCandidates(moduleField?: string): string[] {
 
 async function loadModule(folder: string, manifest: Manifest): Promise<any> {
   const candidates = normaliseModuleCandidates(manifest.module);
+  
+  // Calculate relative path from skills-loader location to skill folder
+  const loaderDir = path.dirname(fileURLToPath(import.meta.url));
+  const skillName = path.basename(folder);
+  
+  // In compiled code, both loader and skills are in dist/skills/
+  // So we can use a simple relative import like ./lovdata-api/index.js
+  // Try relative imports first (works better in serverless environments)
+  for (const candidate of candidates) {
+    // For relative imports, use the skill name + module name
+    // e.g., ./lovdata-api/index.js
+    const moduleName = candidate.replace(/\.(js|ts)$/, '');
+    const relativeImport = `./${skillName}/${moduleName}.js`;
+    
+    try {
+      return await import(relativeImport);
+    } catch (error: unknown) {
+      // If relative import fails, continue to try other methods
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (
+        (error as NodeJS.ErrnoException).code === 'ERR_MODULE_NOT_FOUND' ||
+        (error as NodeJS.ErrnoException).code === 'ENOENT' ||
+        errorMessage.includes('Cannot find module') ||
+        errorMessage.includes('Cannot resolve')
+      ) {
+        continue;
+      }
+      // Re-throw non-module-not-found errors
+      throw error;
+    }
+  }
+  
+  // Fallback: try absolute file:// URL (for development with tsx)
   for (const candidate of candidates) {
     const absolutePath = path.join(folder, candidate);
     try {
       const importUrl = pathToFileURL(absolutePath).href;
       return await import(importUrl);
     } catch (error: unknown) {
-      if ((error as NodeJS.ErrnoException).code === 'ERR_MODULE_NOT_FOUND' || (error as NodeJS.ErrnoException).code === 'ENOENT') {
-        continue;
-      }
-      if (error instanceof Error && 'code' in error && (error as any).code === 'MODULE_NOT_FOUND') {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (
+        (error as NodeJS.ErrnoException).code === 'ERR_MODULE_NOT_FOUND' ||
+        (error as NodeJS.ErrnoException).code === 'ENOENT' ||
+        (error instanceof Error && 'code' in error && (error as any).code === 'MODULE_NOT_FOUND') ||
+        errorMessage.includes('Cannot find module') ||
+        errorMessage.includes('Cannot resolve')
+      ) {
         continue;
       }
       throw error;
     }
   }
-  throw new Error(`Unable to resolve module for skill ${manifest.name}. Checked: ${candidates.join(', ')}`);
+  
+  throw new Error(`Unable to resolve module for skill ${manifest.name}. Checked: ${candidates.join(', ')}. Folder: ${folder}, Skill name: ${skillName}`);
 }
 
 export async function loadSkillFromFolder(folder: string): Promise<Skill> {
