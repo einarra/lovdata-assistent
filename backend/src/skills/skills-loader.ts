@@ -16,6 +16,8 @@ export type Manifest = {
 
 async function readManifest(folder: string): Promise<Manifest> {
   const candidates = ['skill.json', 'skill.yaml', 'skill.yml'];
+  
+  // Try to find manifest in the provided folder first
   for (const filename of candidates) {
     const manifestPath = path.join(folder, filename);
     try {
@@ -31,7 +33,37 @@ async function readManifest(folder: string): Promise<Manifest> {
       throw error;
     }
   }
-  throw new Error(`No skill manifest found in ${folder}`);
+  
+  // Fallback: if we're in dist/, try looking in src/ (for development or if copy failed)
+  // This helps when skill.json files aren't copied to dist during build
+  // Also try relative paths that might work in different deployment scenarios
+  const fallbackPaths: string[] = [];
+  if (folder.includes('/dist/')) {
+    fallbackPaths.push(folder.replace('/dist/', '/src/'));
+    // Also try without the dist/src distinction (in case of different path structures)
+    const skillName = path.basename(folder);
+    fallbackPaths.push(path.join(path.dirname(path.dirname(folder)), 'src', 'skills', skillName));
+  }
+  
+  for (const fallbackFolder of fallbackPaths) {
+    for (const filename of candidates) {
+      const manifestPath = path.join(fallbackFolder, filename);
+      try {
+        const raw = await fs.readFile(manifestPath, 'utf8');
+        if (filename.endsWith('.json')) {
+          return JSON.parse(raw);
+        }
+        throw new Error('YAML support not implemented. Please provide skill.json');
+      } catch (error: unknown) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+          continue;
+        }
+        throw error;
+      }
+    }
+  }
+  
+  throw new Error(`No skill manifest found in ${folder}${folder.includes('/dist/') ? ` or ${folder.replace('/dist/', '/src/')}` : ''}`);
 }
 
 function normaliseModuleCandidates(moduleField?: string): string[] {
