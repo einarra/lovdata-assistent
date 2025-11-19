@@ -194,21 +194,75 @@ class ApiService {
       method: requestOptions.method,
       hasBody: !!requestOptions.body,
       bodyLength: requestOptions.body.length,
+      bodyPreview: payload.question?.substring(0, 50) || 'no question',
       hasAuth: !!requestOptions.headers.Authorization,
-      contentType: requestOptions.headers['Content-Type']
+      authTokenPreview: token ? `${token.substring(0, 20)}...` : 'missing',
+      contentType: requestOptions.headers['Content-Type'],
+      baseUrl: this.baseUrl
     });
 
-    const response = await fetch(url, requestOptions);
+    let response: Response;
+    try {
+      response = await fetch(url, requestOptions);
+      console.log('[Frontend] Received response:', {
+        status: response.status,
+        statusText: response.statusText,
+        ok: response.ok,
+        contentType: response.headers.get('content-type'),
+        url: response.url
+      });
+    } catch (networkError) {
+      // Network error - request never reached server
+      console.error('[Frontend] Network error making request:', {
+        error: networkError instanceof Error ? networkError.message : String(networkError),
+        url: url,
+        method: requestOptions.method,
+        stack: networkError instanceof Error ? networkError.stack : undefined
+      });
+      
+      const errorMessage = networkError instanceof Error 
+        ? networkError.message 
+        : 'Network error occurred';
+      
+      throw new Error(`Failed to connect to server: ${errorMessage}. Please check your internet connection and try again.`);
+    }
 
     if (!response.ok) {
       let errorMessage = `Assistant run failed: ${response.statusText}`;
       let errorHint: string | undefined;
+      let errorDetail: string | undefined;
+      
       try {
         const errorData = await this.parseErrorResponse(response);
         errorMessage = errorData.message || errorData.detail || errorMessage;
         errorHint = errorData.hint;
-      } catch {
-        // If parsing fails, use status text
+        errorDetail = errorData.detail;
+        
+        console.error('[Frontend] Error response details:', {
+          status: response.status,
+          statusText: response.statusText,
+          message: errorMessage,
+          hint: errorHint,
+          detail: errorDetail
+        });
+      } catch (parseError) {
+        // If parsing fails, try to get text
+        try {
+          const errorText = await response.text();
+          console.error('[Frontend] Error response (raw text):', {
+            status: response.status,
+            statusText: response.statusText,
+            text: errorText.substring(0, 500)
+          });
+          if (errorText) {
+            errorMessage = errorText.length > 200 
+              ? `${errorMessage}. Response: ${errorText.substring(0, 200)}...`
+              : `${errorMessage}. Response: ${errorText}`;
+          }
+        } catch {
+          // If even text parsing fails, use status text
+          console.error('[Frontend] Could not parse error response');
+        }
       }
       
       // Provide helpful error messages for common issues
@@ -218,6 +272,14 @@ class ApiService {
         } else {
           errorMessage = 'Authentication failed. Please log in again.';
         }
+      } else if (response.status === 404) {
+        errorMessage = `Endpoint not found. The server may not be configured correctly. ${errorHint || ''}`;
+      } else if (response.status === 405) {
+        errorMessage = `Method not allowed. ${errorHint || 'The request method may be incorrect.'}`;
+      } else if (response.status === 400) {
+        errorMessage = `Invalid request: ${errorMessage}. ${errorHint || 'Please check your input and try again.'}`;
+      } else if (response.status >= 500) {
+        errorMessage = `Server error: ${errorMessage}. ${errorHint || 'Please try again later.'}`;
       }
       
       throw new Error(errorMessage);
