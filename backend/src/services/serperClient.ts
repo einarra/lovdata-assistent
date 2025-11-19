@@ -47,8 +47,8 @@ export class SerperClient {
       hl: options.hl ?? 'no'
     };
 
-    // Add timeout to prevent hanging (10 seconds max - keep it short to avoid Vercel timeout)
-    const timeoutMs = 10000;
+    // Add timeout to prevent hanging (8 seconds max - keep it short since we've already used ~4s on DB query)
+    const timeoutMs = 8000;
     const startTime = Date.now();
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
@@ -60,8 +60,9 @@ export class SerperClient {
     try {
       console.log(`[SerperClient] Starting search: ${query.substring(0, 50)}...`);
       console.log(`[SerperClient] URL: ${this.baseUrl}, timeout: ${timeoutMs}ms`);
+      console.log(`[SerperClient] About to call fetch with AbortController signal`);
       
-      const response = await fetch(this.baseUrl, {
+      const fetchPromise = fetch(this.baseUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -70,7 +71,10 @@ export class SerperClient {
         body: JSON.stringify(payload),
         signal: controller.signal
       });
-
+      
+      console.log(`[SerperClient] Fetch promise created, awaiting response...`);
+      const response = await fetchPromise;
+      
       clearTimeout(timeoutId);
       const elapsed = Date.now() - startTime;
       console.log(`[SerperClient] Response received after ${elapsed}ms, status: ${response.status}`);
@@ -80,17 +84,22 @@ export class SerperClient {
         throw new Error(`Serper search failed (${response.status}): ${body}`);
       }
 
+      console.log(`[SerperClient] Parsing response JSON...`);
       const jsonResult = await response.json() as SerperResponse;
-      console.log(`[SerperClient] Search completed successfully`);
+      const totalElapsed = Date.now() - startTime;
+      console.log(`[SerperClient] Search completed successfully after ${totalElapsed}ms`);
       return jsonResult;
     } catch (error) {
       clearTimeout(timeoutId);
       const elapsed = Date.now() - startTime;
       console.log(`[SerperClient] Error after ${elapsed}ms:`, error instanceof Error ? error.message : String(error));
+      console.log(`[SerperClient] Error type: ${error instanceof Error ? error.name : typeof error}`);
       
       if (error instanceof Error && error.name === 'AbortError') {
+        console.log(`[SerperClient] AbortError detected, throwing timeout error`);
         throw new Error(`Serper search timed out after ${timeoutMs}ms`);
       }
+      console.log(`[SerperClient] Re-throwing error`);
       throw error;
     }
   }
