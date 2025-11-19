@@ -321,24 +321,53 @@ export class SupabaseArchiveStore {
           .range(offset, offset + limit - 1);
         
         this.logs.info('searchAsync: query chain built, awaiting result');
-        const result = await queryBuilder;
         
-        const queryDuration = Date.now() - queryStartTime;
-        this.logs.info({ queryDurationMs: queryDuration }, 'searchAsync: Supabase query promise resolved');
+        // Add an additional timeout wrapper around the query itself
+        // This ensures we catch hanging queries even if the outer Promise.race doesn't work
+        const queryTimeoutMs = 10000; // 10 seconds for the query itself
+        let queryTimeoutHandle: NodeJS.Timeout | null = null;
+        const queryTimeoutPromise = new Promise<never>((_, reject) => {
+          queryTimeoutHandle = setTimeout(() => {
+            const elapsed = Date.now() - queryStartTime;
+            this.logs.error({ elapsedMs: elapsed, queryTimeoutMs }, 'searchAsync: query execution timed out (internal timeout)');
+            reject(new Error(`Query execution timed out after ${queryTimeoutMs}ms`));
+          }, queryTimeoutMs);
+        });
         
-        if (queryAborted) {
-          this.logs.warn('searchAsync: query completed but was already aborted');
-          throw new Error('Query was aborted due to timeout');
+        try {
+          this.logs.info({ queryTimeoutMs }, 'searchAsync: awaiting query with internal timeout');
+          const result = await Promise.race([
+            queryBuilder,
+            queryTimeoutPromise
+          ]);
+          
+          if (queryTimeoutHandle) {
+            clearTimeout(queryTimeoutHandle);
+          }
+          
+          const queryDuration = Date.now() - queryStartTime;
+          this.logs.info({ queryDurationMs: queryDuration }, 'searchAsync: Supabase query promise resolved');
+          
+          if (queryAborted) {
+            this.logs.warn('searchAsync: query completed but was already aborted');
+            throw new Error('Query was aborted due to timeout');
+          }
+          
+          this.logs.info({ 
+            hasData: !!result.data,
+            dataLength: result.data?.length ?? 0,
+            hasError: !!result.error,
+            count: result.count
+          }, 'searchAsync: query completed');
+          
+          return result;
+        } catch (queryTimeoutError) {
+          if (queryTimeoutHandle) {
+            clearTimeout(queryTimeoutHandle);
+          }
+          // Re-throw the timeout error so outer error handling can catch it
+          throw queryTimeoutError;
         }
-        
-        this.logs.info({ 
-          hasData: !!result.data,
-          dataLength: result.data?.length ?? 0,
-          hasError: !!result.error,
-          count: result.count
-        }, 'searchAsync: query completed');
-        
-        return result;
       } catch (queryError) {
         const queryDuration = Date.now() - queryStartTime;
         if (!queryAborted) {
