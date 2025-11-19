@@ -291,38 +291,66 @@ export class SupabaseArchiveStore {
     
     this.logs.info({ tsQuery, limit, offset }, 'searchAsync: executing database query');
     
-    // Add timeout to prevent hanging (20 seconds max - Vercel functions have 60s limit)
-    const timeoutMs = 20000;
-    const queryPromise = this.supabase
-      .from('lovdata_documents')
-      .select('archive_filename, member, title, document_date, content', { count: 'exact' })
-      .textSearch('tsv_content', tsQuery, {
-        type: 'plain',
-        config: 'norwegian'
-      })
-      .order('id', { ascending: true })
-      .range(offset, offset + limit - 1);
+    // Add timeout to prevent hanging (15 seconds max - Vercel functions have 60s limit)
+    const timeoutMs = 15000;
+    let timeoutHandle: NodeJS.Timeout | null = null;
+    let queryAborted = false;
+    
+    const queryPromise = (async () => {
+      try {
+        this.logs.info('searchAsync: starting Supabase query');
+        const result = await this.supabase
+          .from('lovdata_documents')
+          .select('archive_filename, member, title, document_date, content', { count: 'exact' })
+          .textSearch('tsv_content', tsQuery, {
+            type: 'plain',
+            config: 'norwegian'
+          })
+          .order('id', { ascending: true })
+          .range(offset, offset + limit - 1);
+        
+        if (queryAborted) {
+          this.logs.warn('searchAsync: query completed but was already aborted');
+          throw new Error('Query was aborted due to timeout');
+        }
+        
+        this.logs.info({ 
+          hasData: !!result.data,
+          dataLength: result.data?.length ?? 0,
+          hasError: !!result.error,
+          count: result.count
+        }, 'searchAsync: query completed');
+        
+        return result;
+      } catch (queryError) {
+        if (!queryAborted) {
+          this.logs.error({ err: queryError }, 'searchAsync: query error');
+        }
+        throw queryError;
+      }
+    })();
     
     const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => {
+      timeoutHandle = setTimeout(() => {
+        queryAborted = true;
         reject(new Error(`Database query timed out after ${timeoutMs}ms`));
       }, timeoutMs);
     });
     
     let data, error, count;
     try {
-      this.logs.info('searchAsync: waiting for query result');
+      this.logs.info('searchAsync: waiting for query result with timeout');
       const result = await Promise.race([queryPromise, timeoutPromise]);
-      this.logs.info({ 
-        hasData: !!result.data,
-        dataLength: result.data?.length ?? 0,
-        hasError: !!result.error,
-        count: result.count
-      }, 'searchAsync: query completed');
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+      }
       data = result.data;
       error = result.error;
       count = result.count;
     } catch (timeoutError) {
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+      }
       queryTimer.end({ success: false, error: timeoutError instanceof Error ? timeoutError.message : String(timeoutError) });
       searchTimer.end({ success: false, error: 'timeout' });
       this.logs.error({ err: timeoutError, query, tsQuery, limit, offset }, 'Database query timed out');

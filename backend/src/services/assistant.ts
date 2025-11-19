@@ -89,7 +89,15 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
       logger.info('runAssistant: calling skill.searchPublicData');
       let skillOutput: any;
       try {
-        const traceResult = await withTrace(
+        // Add overall timeout for the entire skill execution (25 seconds)
+        const skillTimeoutMs = 25000;
+        const skillTimeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => {
+            reject(new Error(`Skill execution timed out after ${skillTimeoutMs}ms`));
+          }, skillTimeoutMs);
+        });
+        
+        const skillExecutionPromise = withTrace(
           {
             name: 'skill.searchPublicData',
             runType: 'tool',
@@ -129,6 +137,8 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
             return result;
           }
         );
+        
+        const traceResult = await Promise.race([skillExecutionPromise, skillTimeoutPromise]);
         skillOutput = traceResult;
         logger.info('runAssistant: skill.searchPublicData trace completed');
       } catch (skillError) {
@@ -136,7 +146,25 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
           err: skillError,
           stack: skillError instanceof Error ? skillError.stack : undefined
         }, 'runAssistant: skill.searchPublicData failed');
-        throw skillError;
+        
+        // If skill execution fails or times out, continue with empty results
+        // This allows the assistant to still provide a response
+        logger.warn('runAssistant: continuing with empty results due to skill failure');
+        skillOutput = {
+          result: {
+            hits: [],
+            searchedFiles: [],
+            totalHits: 0,
+            page: 1,
+            pageSize: 5,
+            totalPages: 0
+          },
+          meta: {
+            skill: 'lovdata-api',
+            action: 'searchPublicData',
+            error: skillError instanceof Error ? skillError.message : String(skillError)
+          }
+        };
       }
       
       // skillOutput is { result: SkillOutput, runId: string } from withTrace
