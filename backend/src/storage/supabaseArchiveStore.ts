@@ -324,7 +324,8 @@ export class SupabaseArchiveStore {
         
         // Add an additional timeout wrapper around the query itself
         // This ensures we catch hanging queries even if the outer Promise.race doesn't work
-        const queryTimeoutMs = 10000; // 10 seconds for the query itself
+        // Use 7 seconds to ensure timeout triggers well before Vercel Hobby tier 10s limit
+        const queryTimeoutMs = 7000; // 7 seconds for the query itself
         let queryTimeoutHandle: NodeJS.Timeout | null = null;
         const queryTimeoutPromise = new Promise<never>((_, reject) => {
           queryTimeoutHandle = setTimeout(() => {
@@ -335,10 +336,23 @@ export class SupabaseArchiveStore {
         });
         
         try {
-          this.logs.info({ queryTimeoutMs }, 'searchAsync: awaiting query with internal timeout');
+          this.logs.info({ queryTimeoutMs, queryStartTime }, 'searchAsync: awaiting query with internal timeout');
+          
+          // Log right before Promise.race to ensure we get there
+          const raceStartTime = Date.now();
+          this.logs.info({ raceStartTime }, 'searchAsync: starting internal Promise.race');
+          
           const result = await Promise.race([
-            queryBuilder,
-            queryTimeoutPromise
+            queryBuilder.then(r => {
+              const raceDuration = Date.now() - raceStartTime;
+              this.logs.info({ raceDurationMs: raceDuration, resolvedBy: 'query' }, 'searchAsync: internal Promise.race resolved - query won');
+              return r;
+            }),
+            queryTimeoutPromise.then(() => {
+              const raceDuration = Date.now() - raceStartTime;
+              this.logs.info({ raceDurationMs: raceDuration, resolvedBy: 'timeout' }, 'searchAsync: internal Promise.race resolved - timeout won');
+              throw new Error('Internal query timeout');
+            })
           ]);
           
           if (queryTimeoutHandle) {

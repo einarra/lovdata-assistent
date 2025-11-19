@@ -193,14 +193,32 @@ export function createApp() {
       // Execute assistant run
       logger.info({ question: payload.question }, 'Assistant run: starting execution');
       
+      // Add a top-level timeout to ensure we always return a response (50 seconds max)
+      // This wraps the entire runAssistant call to prevent infinite hangs
+      const executionTimeoutMs = 50000;
+      let executionTimeoutHandle: NodeJS.Timeout | null = null;
+      const executionTimeoutPromise = new Promise<never>((_, reject) => {
+        executionTimeoutHandle = setTimeout(() => {
+          logger.error({ timeoutMs: executionTimeoutMs }, 'Assistant run: execution timeout reached, returning error response');
+          reject(new Error(`Assistant execution timed out after ${executionTimeoutMs}ms`));
+        }, executionTimeoutMs);
+      });
+      
       let output;
       try {
-        output = await timeOperation(
+        const assistantPromise = timeOperation(
           'assistant_run',
           () => runAssistant(payload, userId ? { userId } : undefined),
           logger,
           { endpoint: '/assistant/run', userId, questionLength: payload.question.length }
         );
+        
+        logger.info('Assistant run: awaiting execution with timeout');
+        output = await Promise.race([assistantPromise, executionTimeoutPromise]);
+        
+        if (executionTimeoutHandle) {
+          clearTimeout(executionTimeoutHandle);
+        }
         
         logger.info({
           answerLength: output.answer.length,
@@ -208,11 +226,38 @@ export function createApp() {
           usedAgent: output.metadata.usedAgent
         }, 'Assistant run: completed successfully');
       } catch (runError) {
+        if (executionTimeoutHandle) {
+          clearTimeout(executionTimeoutHandle);
+        }
+        
         logger.error({ 
           err: runError,
           question: payload.question,
           stack: runError instanceof Error ? runError.stack : undefined
         }, 'Assistant run: execution failed');
+        
+        // If it's a timeout, return a user-friendly error response
+        if (runError instanceof Error && runError.message.includes('timed out')) {
+          if (!res.headersSent) {
+            res.status(504).json({
+              answer: 'Beklager, forespørselen tok for lang tid. Vennligst prøv igjen.',
+              evidence: [],
+              citations: [],
+              pagination: { page: 1, pageSize: 5, totalHits: 0, totalPages: 0 },
+              metadata: {
+                fallbackProvider: null,
+                skillMeta: null,
+                agentModel: null,
+                usedAgent: false,
+                generatedAt: new Date().toISOString(),
+                processingTimeMs: executionTimeoutMs,
+                error: 'execution_timeout'
+              }
+            });
+            return;
+          }
+        }
+        
         throw runError;
       }
       
