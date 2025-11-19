@@ -303,7 +303,14 @@ export class SupabaseArchiveStore {
     const queryPromise = (async () => {
       try {
         this.logs.info('searchAsync: starting Supabase query');
-        const result = await this.supabase
+        this.logs.info({ 
+          table: 'lovdata_documents',
+          tsQuery,
+          limit,
+          offset
+        }, 'searchAsync: building query chain');
+        
+        const queryBuilder = this.supabase
           .from('lovdata_documents')
           .select('archive_filename, member, title, document_date, content', { count: 'exact' })
           .textSearch('tsv_content', tsQuery, {
@@ -312,6 +319,9 @@ export class SupabaseArchiveStore {
           })
           .order('id', { ascending: true })
           .range(offset, offset + limit - 1);
+        
+        this.logs.info('searchAsync: query chain built, awaiting result');
+        const result = await queryBuilder;
         
         const queryDuration = Date.now() - queryStartTime;
         this.logs.info({ queryDurationMs: queryDuration }, 'searchAsync: Supabase query promise resolved');
@@ -359,20 +369,30 @@ export class SupabaseArchiveStore {
       // Add a safety check - log periodically to see if we're still waiting
       // Use info level to ensure it shows up in Vercel logs
       // Log every 5 seconds for longer timeout
-      // Log immediately after 1 second to confirm interval is working
+      // Also log more frequently to catch issues early
       this.logs.info('searchAsync: setting up progress interval');
       const progressInterval = setInterval(() => {
         const elapsed = Date.now() - queryStartTime;
         this.logs.info({ elapsedMs: elapsed, timeoutMs, progress: `${Math.round((elapsed / timeoutMs) * 100)}%` }, 'searchAsync: still waiting for query (progress check)');
       }, 5000);
       
-      // Also log after 1 second to confirm interval is working
+      // Also log after 1, 3, and 5 seconds to track progress
       setTimeout(() => {
         const elapsed = Date.now() - queryStartTime;
         this.logs.info({ elapsedMs: elapsed }, 'searchAsync: 1 second check - function still running');
       }, 1000);
       
-      this.logs.info('searchAsync: progress interval and 1-second check set up');
+      setTimeout(() => {
+        const elapsed = Date.now() - queryStartTime;
+        this.logs.info({ elapsedMs: elapsed }, 'searchAsync: 3 second check - function still running');
+      }, 3000);
+      
+      setTimeout(() => {
+        const elapsed = Date.now() - queryStartTime;
+        this.logs.info({ elapsedMs: elapsed }, 'searchAsync: 5 second check - function still running');
+      }, 5000);
+      
+      this.logs.info('searchAsync: progress interval and timed checks set up');
       
       // Use a wrapper that ensures timeout always triggers
       const racePromise = Promise.race([
