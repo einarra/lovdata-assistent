@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 import type { SkillContext, SkillIO } from './skills-core.js';
 import { Skill } from './skills-core.js';
 import { SKILL_MANIFESTS } from './skill-manifests.js';
