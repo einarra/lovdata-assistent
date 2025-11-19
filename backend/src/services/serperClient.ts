@@ -47,8 +47,9 @@ export class SerperClient {
       hl: options.hl ?? 'no'
     };
 
-    // Add timeout to prevent hanging (8 seconds max - keep it short since we've already used ~4s on DB query)
-    const timeoutMs = 8000;
+    // Add timeout to prevent hanging (5 seconds max - keep it short since we've already used ~4-6s on DB query)
+    // With Vercel's ~10s limit, we need to be aggressive here
+    const timeoutMs = 5000;
     const startTime = Date.now();
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
