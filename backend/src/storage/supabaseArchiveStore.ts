@@ -291,10 +291,9 @@ export class SupabaseArchiveStore {
     
     this.logs.info({ tsQuery, limit, offset }, 'searchAsync: executing database query');
     
-    // Add timeout to prevent hanging (5 seconds max - Vercel Hobby has 10s limit)
-    // Using 5s to ensure timeout triggers well before Vercel kills the function
-    // This gives us time to handle the timeout and return a response
-    const timeoutMs = 5000;
+    // Add timeout to prevent hanging (60 seconds max - matches Vercel Pro function timeout)
+    // This gives queries plenty of time to complete while still preventing infinite hangs
+    const timeoutMs = 60000;
     let timeoutHandle: NodeJS.Timeout | null = null;
     let queryAborted = false;
     const queryStartTime = Date.now();
@@ -356,11 +355,11 @@ export class SupabaseArchiveStore {
       
       // Add a safety check - log periodically to see if we're still waiting
       // Use info level to ensure it shows up in Vercel logs
-      // Start logging immediately (don't wait for first interval)
+      // Log every 5 seconds for longer timeout
       const progressInterval = setInterval(() => {
         const elapsed = Date.now() - queryStartTime;
-        this.logs.info({ elapsedMs: elapsed, timeoutMs }, 'searchAsync: still waiting for query (progress check)');
-      }, 1000);
+        this.logs.info({ elapsedMs: elapsed, timeoutMs, progress: `${Math.round((elapsed / timeoutMs) * 100)}%` }, 'searchAsync: still waiting for query (progress check)');
+      }, 5000);
       
       // Log immediately
       this.logs.info({ elapsedMs: 0 }, 'searchAsync: progress check - starting Promise.race');
