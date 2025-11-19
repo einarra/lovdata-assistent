@@ -311,6 +311,7 @@ export class SupabaseArchiveStore {
           offset
         }, 'searchAsync: building query chain');
         
+        console.log(`[SupabaseArchiveStore] Building query builder...`);
         const queryBuilder = this.supabase
           .from('lovdata_documents')
           .select('archive_filename, member, title, document_date, content', { count: 'exact' })
@@ -321,12 +322,13 @@ export class SupabaseArchiveStore {
           .order('id', { ascending: true })
           .range(offset, offset + limit - 1);
         
+        console.log(`[SupabaseArchiveStore] Query builder created, preparing to execute`);
         this.logs.info('searchAsync: query chain built, awaiting result');
         
         // Add an additional timeout wrapper around the query itself
         // This ensures we catch hanging queries even if the outer Promise.race doesn't work
-        // Use 7 seconds to ensure timeout triggers well before Vercel Hobby tier 10s limit
-        const queryTimeoutMs = 7000; // 7 seconds for the query itself
+        // Use 5 seconds to ensure timeout triggers well before any Vercel limits
+        const queryTimeoutMs = 5000; // 5 seconds for the query itself - aggressive to catch hangs early
         let queryTimeoutHandle: NodeJS.Timeout | null = null;
         const queryTimeoutPromise = new Promise<never>((_, reject) => {
           queryTimeoutHandle = setTimeout(() => {
@@ -343,14 +345,28 @@ export class SupabaseArchiveStore {
           const raceStartTime = Date.now();
           this.logs.info({ raceStartTime }, 'searchAsync: starting internal Promise.race');
           
+          // Log right before we execute the query
+          console.log(`[SupabaseArchiveStore] About to execute query builder...`);
+          this.logs.info('searchAsync: executing query builder');
+          
+          const queryExecutionPromise = queryBuilder.then(r => {
+            const raceDuration = Date.now() - raceStartTime;
+            console.log(`[SupabaseArchiveStore] Query builder completed after ${raceDuration}ms`);
+            this.logs.info({ raceDurationMs: raceDuration, resolvedBy: 'query' }, 'searchAsync: internal Promise.race resolved - query won');
+            return r;
+          }).catch(err => {
+            const raceDuration = Date.now() - raceStartTime;
+            console.log(`[SupabaseArchiveStore] Query builder failed after ${raceDuration}ms:`, err instanceof Error ? err.message : String(err));
+            this.logs.error({ err, raceDurationMs: raceDuration }, 'searchAsync: query builder failed');
+            throw err;
+          });
+          
+          console.log(`[SupabaseArchiveStore] Starting internal Promise.race, queryTimeoutMs: ${queryTimeoutMs}`);
           const result = await Promise.race([
-            queryBuilder.then(r => {
-              const raceDuration = Date.now() - raceStartTime;
-              this.logs.info({ raceDurationMs: raceDuration, resolvedBy: 'query' }, 'searchAsync: internal Promise.race resolved - query won');
-              return r;
-            }),
+            queryExecutionPromise,
             queryTimeoutPromise.then(() => {
               const raceDuration = Date.now() - raceStartTime;
+              console.log(`[SupabaseArchiveStore] Internal timeout triggered after ${raceDuration}ms`);
               this.logs.info({ raceDurationMs: raceDuration, resolvedBy: 'timeout' }, 'searchAsync: internal Promise.race resolved - timeout won');
               throw new Error('Internal query timeout');
             })
