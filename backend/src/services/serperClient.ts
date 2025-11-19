@@ -32,19 +32,35 @@ export class SerperClient {
 
   async search(query: string, options: SerperSearchOptions = {}): Promise<SerperResponse> {
     this.assertConfigured();
+    
+    // Normalize site to remove protocol if present (Serper expects just the domain)
+    let siteQuery = '';
+    if (options.site) {
+      const normalizedSite = options.site.replace(/^https?:\/\//, '').replace(/\/$/, '');
+      siteQuery = `site:${normalizedSite} `;
+    }
+    
     const payload = {
-      q: options.site ? `site:${options.site} ${query}` : query,
+      q: `${siteQuery}${query}`.trim(),
       num: options.num ?? 10,
       gl: options.gl ?? 'no',
       hl: options.hl ?? 'no'
     };
 
-    // Add timeout to prevent hanging (30 seconds max)
-    const timeoutMs = 30000;
+    // Add timeout to prevent hanging (10 seconds max - keep it short to avoid Vercel timeout)
+    const timeoutMs = 10000;
+    const startTime = Date.now();
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    const timeoutId = setTimeout(() => {
+      const elapsed = Date.now() - startTime;
+      console.log(`[SerperClient] Timeout triggered after ${elapsed}ms`);
+      controller.abort();
+    }, timeoutMs);
 
     try {
+      console.log(`[SerperClient] Starting search: ${query.substring(0, 50)}...`);
+      console.log(`[SerperClient] URL: ${this.baseUrl}, timeout: ${timeoutMs}ms`);
+      
       const response = await fetch(this.baseUrl, {
         method: 'POST',
         headers: {
@@ -56,15 +72,22 @@ export class SerperClient {
       });
 
       clearTimeout(timeoutId);
+      const elapsed = Date.now() - startTime;
+      console.log(`[SerperClient] Response received after ${elapsed}ms, status: ${response.status}`);
 
       if (!response.ok) {
         const body = await response.text();
         throw new Error(`Serper search failed (${response.status}): ${body}`);
       }
 
-      return (await response.json()) as SerperResponse;
+      const jsonResult = await response.json() as SerperResponse;
+      console.log(`[SerperClient] Search completed successfully`);
+      return jsonResult;
     } catch (error) {
       clearTimeout(timeoutId);
+      const elapsed = Date.now() - startTime;
+      console.log(`[SerperClient] Error after ${elapsed}ms:`, error instanceof Error ? error.message : String(error));
+      
       if (error instanceof Error && error.name === 'AbortError') {
         throw new Error(`Serper search timed out after ${timeoutMs}ms`);
       }
