@@ -3,6 +3,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { SkillContext, SkillIO } from './skills-core.js';
 import { Skill } from './skills-core.js';
+import { SKILL_MANIFESTS } from './skill-manifests.js';
 
 export type Manifest = {
   name: string;
@@ -15,6 +16,13 @@ export type Manifest = {
 };
 
 async function readManifest(folder: string): Promise<Manifest> {
+  // First, try to get manifest from embedded manifests (always available)
+  const skillName = path.basename(folder);
+  if (SKILL_MANIFESTS[skillName]) {
+    return SKILL_MANIFESTS[skillName];
+  }
+  
+  // Fallback: try to read from file system (for development or custom skills)
   const candidates = ['skill.json', 'skill.yaml', 'skill.yml'];
   
   // Try to find manifest in the provided folder first
@@ -41,7 +49,6 @@ async function readManifest(folder: string): Promise<Manifest> {
   if (folder.includes('/dist/')) {
     fallbackPaths.push(folder.replace('/dist/', '/src/'));
     // Also try without the dist/src distinction (in case of different path structures)
-    const skillName = path.basename(folder);
     fallbackPaths.push(path.join(path.dirname(path.dirname(folder)), 'src', 'skills', skillName));
   }
   
@@ -63,7 +70,7 @@ async function readManifest(folder: string): Promise<Manifest> {
     }
   }
   
-  throw new Error(`No skill manifest found in ${folder}${folder.includes('/dist/') ? ` or ${folder.replace('/dist/', '/src/')}` : ''}`);
+  throw new Error(`No skill manifest found for ${skillName}. Checked embedded manifests and file system paths: ${folder}${folder.includes('/dist/') ? `, ${folder.replace('/dist/', '/src/')}` : ''}`);
 }
 
 function normaliseModuleCandidates(moduleField?: string): string[] {
