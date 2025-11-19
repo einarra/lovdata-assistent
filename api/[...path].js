@@ -102,9 +102,23 @@ export default async function catchAllHandler(req, res) {
         method: req.method,
         hasBody: !!req.body,
         contentType: req.headers['content-type'],
-        contentLength: req.headers['content-length']
+        contentLength: req.headers['content-length'],
+        authorization: req.headers.authorization ? 'present' : 'missing'
       });
     }
+  }
+  
+  // Special logging for assistant/run to help diagnose issues
+  if (path === '/assistant/run') {
+    console.log('[CatchAll] Assistant run request detected:', {
+      method: req.method,
+      path: path,
+      hasBody: !!req.body,
+      bodyType: typeof req.body,
+      bodyPreview: req.body && typeof req.body === 'object' ? JSON.stringify(req.body).substring(0, 200) : (typeof req.body === 'string' ? req.body.substring(0, 200) : 'none'),
+      contentType: req.headers['content-type'],
+      authorization: req.headers.authorization ? 'present' : 'missing'
+    });
   }
   
   // Don't delete query params here - let the main handler use them if needed

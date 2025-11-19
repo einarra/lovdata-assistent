@@ -303,8 +303,24 @@ export default async function handler(req, res) {
         path: req.path,
         originalUrl: req.originalUrl,
         hasBody: !!req.body,
-        bodyType: typeof req.body
+        bodyType: typeof req.body,
+        bodyPreview: req.body && typeof req.body === 'object' ? JSON.stringify(req.body).substring(0, 200) : (typeof req.body === 'string' ? req.body.substring(0, 200) : 'none'),
+        contentType: req.headers['content-type'],
+        authorization: req.headers.authorization ? 'present' : 'missing'
       });
+      
+      // Special logging for assistant/run
+      if (path === '/assistant/run') {
+        console.log('[API/index.js] Assistant run request - before Express:', {
+          method: req.method,
+          path: req.path,
+          hasBody: !!req.body,
+          bodyKeys: req.body && typeof req.body === 'object' ? Object.keys(req.body) : [],
+          bodyPreview: req.body && typeof req.body === 'object' ? JSON.stringify(req.body).substring(0, 300) : (typeof req.body === 'string' ? req.body.substring(0, 300) : 'none'),
+          contentType: req.headers['content-type'],
+          authorization: req.headers.authorization ? 'present' : 'missing'
+        });
+      }
       
       try {
         app(req, res, (err) => {
@@ -314,8 +330,21 @@ export default async function handler(req, res) {
               error: err.message,
               statusCode: err.statusCode || err.status,
               path: req.path,
-              method: req.method
+              method: req.method,
+              stack: err.stack
             });
+            
+            // Special logging for assistant/run errors
+            if (path === '/assistant/run') {
+              console.error('[API/index.js] Assistant run error details:', {
+                error: err.message,
+                statusCode: err.statusCode || err.status,
+                stack: err.stack,
+                hasBody: !!req.body,
+                bodyType: typeof req.body
+              });
+            }
+            
             if (!res.headersSent) {
               const statusCode = err.statusCode || err.status || 500;
               res.status(statusCode).json({ 
@@ -336,6 +365,20 @@ export default async function handler(req, res) {
               path: req.path,
               originalUrl: req.originalUrl
             });
+            
+            // Special logging for assistant/run 404s
+            if (path === '/assistant/run') {
+              console.error('[API/index.js] Assistant run route not found - this should not happen!', {
+                method: req.method,
+                url: req.url,
+                path: req.path,
+                originalUrl: req.originalUrl,
+                hasBody: !!req.body,
+                bodyType: typeof req.body,
+                contentType: req.headers['content-type']
+              });
+            }
+            
             const errorResponse = { 
               error: 'Not found', 
               path: req.url, 
@@ -365,12 +408,38 @@ export default async function handler(req, res) {
               path: req.path,
               statusCode: res.statusCode
             });
+            
+            // Special logging for assistant/run success
+            if (path === '/assistant/run') {
+              console.log('[API/index.js] Assistant run response sent:', {
+                method: req.method,
+                path: req.path,
+                statusCode: res.statusCode
+              });
+            }
           }
           // Response was sent, wait for it to end
           // The res.end wrapper will call resolve
         });
       } catch (expressError) {
         clearTimeout(timeout);
+        console.error('[API/index.js] Exception while calling Express:', {
+          error: expressError.message,
+          stack: expressError.stack,
+          path: req.path,
+          method: req.method
+        });
+        
+        // Special logging for assistant/run exceptions
+        if (path === '/assistant/run') {
+          console.error('[API/index.js] Assistant run exception:', {
+            error: expressError.message,
+            stack: expressError.stack,
+            hasBody: !!req.body,
+            bodyType: typeof req.body
+          });
+        }
+        
         if (!res.headersSent) {
           res.status(500).json({ 
             error: 'Failed to process request', 

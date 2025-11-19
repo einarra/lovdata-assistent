@@ -151,6 +151,16 @@ export function createApp() {
       // Parse and validate payload
       let payload;
       try {
+        // Check if body exists first
+        if (!req.body || (typeof req.body === 'object' && Object.keys(req.body).length === 0)) {
+          logger.error({ hasBody: !!req.body, bodyType: typeof req.body }, 'Assistant run: request body is missing or empty');
+          res.status(400).json({ 
+            message: 'Request body is required',
+            hint: 'The request body is missing or empty. Ensure the frontend is sending a JSON body with a "question" field.'
+          });
+          return;
+        }
+        
         payload = assistantSchema.parse(req.body ?? {});
         logger.info({
           questionLength: payload.question.length,
@@ -160,6 +170,23 @@ export function createApp() {
         }, 'Assistant run: payload validated');
       } catch (parseError) {
         logger.error({ err: parseError, body: req.body }, 'Assistant run: payload validation failed');
+        
+        // Provide more helpful error messages for validation errors
+        if (parseError instanceof z.ZodError) {
+          const issues = parseError.issues.map(issue => ({
+            path: issue.path.join('.'),
+            message: issue.message
+          }));
+          res.status(400).json({ 
+            message: 'Invalid request payload',
+            issues,
+            hint: issues.some(i => i.path === 'question' && i.message.includes('at least 3')) 
+              ? 'The question must be at least 3 characters long.'
+              : 'Check that all required fields are present and valid.'
+          });
+          return;
+        }
+        
         throw parseError;
       }
       
@@ -184,9 +211,31 @@ export function createApp() {
         path: req.path,
         method: req.method,
         hasBody: !!req.body,
-        bodyType: typeof req.body
+        bodyType: typeof req.body,
+        stack: error instanceof Error ? error.stack : undefined
       }, 'Assistant run: error occurred');
-      next(error);
+      
+      // If response hasn't been sent yet, send error response
+      if (!res.headersSent) {
+        // Check if it's a known error type
+        if (error instanceof z.ZodError) {
+          const issues = error.issues.map(issue => ({
+            path: issue.path.join('.'),
+            message: issue.message
+          }));
+          res.status(400).json({ 
+            message: 'Invalid request payload',
+            issues
+          });
+          return;
+        }
+        
+        // For other errors, let Express error handler deal with it
+        next(error);
+      } else {
+        // Response already sent, just log the error
+        next(error);
+      }
     }
   });
 
