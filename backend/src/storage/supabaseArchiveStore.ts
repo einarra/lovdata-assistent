@@ -353,16 +353,26 @@ export class SupabaseArchiveStore {
     try {
       this.logs.info({ queryStartTime, timeoutMs }, 'searchAsync: waiting for query result with timeout');
       
+      // Log immediately before setting up Promise.race
+      this.logs.info({ elapsedMs: 0 }, 'searchAsync: progress check - starting Promise.race');
+      
       // Add a safety check - log periodically to see if we're still waiting
       // Use info level to ensure it shows up in Vercel logs
       // Log every 5 seconds for longer timeout
+      // Log immediately after 1 second to confirm interval is working
+      this.logs.info('searchAsync: setting up progress interval');
       const progressInterval = setInterval(() => {
         const elapsed = Date.now() - queryStartTime;
         this.logs.info({ elapsedMs: elapsed, timeoutMs, progress: `${Math.round((elapsed / timeoutMs) * 100)}%` }, 'searchAsync: still waiting for query (progress check)');
       }, 5000);
       
-      // Log immediately
-      this.logs.info({ elapsedMs: 0 }, 'searchAsync: progress check - starting Promise.race');
+      // Also log after 1 second to confirm interval is working
+      setTimeout(() => {
+        const elapsed = Date.now() - queryStartTime;
+        this.logs.info({ elapsedMs: elapsed }, 'searchAsync: 1 second check - function still running');
+      }, 1000);
+      
+      this.logs.info('searchAsync: progress interval and 1-second check set up');
       
       // Use a wrapper that ensures timeout always triggers
       const racePromise = Promise.race([
