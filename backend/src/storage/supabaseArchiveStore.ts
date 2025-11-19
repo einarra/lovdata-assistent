@@ -349,12 +349,13 @@ export class SupabaseArchiveStore {
           console.log(`[SupabaseArchiveStore] About to execute query builder...`);
           this.logs.info('searchAsync: executing query builder');
           
-          const queryExecutionPromise = queryBuilder.then(r => {
+          // Wrap the query builder in a Promise to handle errors properly
+          const queryExecutionPromise = Promise.resolve(queryBuilder).then(r => {
             const raceDuration = Date.now() - raceStartTime;
             console.log(`[SupabaseArchiveStore] Query builder completed after ${raceDuration}ms`);
             this.logs.info({ raceDurationMs: raceDuration, resolvedBy: 'query' }, 'searchAsync: internal Promise.race resolved - query won');
             return r;
-          }).catch(err => {
+          }).catch((err: unknown) => {
             const raceDuration = Date.now() - raceStartTime;
             console.log(`[SupabaseArchiveStore] Query builder failed after ${raceDuration}ms:`, err instanceof Error ? err.message : String(err));
             this.logs.error({ err, raceDurationMs: raceDuration }, 'searchAsync: query builder failed');
@@ -552,7 +553,7 @@ export class SupabaseArchiveStore {
 
     // Generate snippets from content
     const snippetTimer = new Timer('generate_snippets', this.logs, { documentCount: data.length });
-    const hits: ArchiveSearchHit[] = data.map(doc => {
+    const hits: ArchiveSearchHit[] = data.map((doc: { archive_filename: string; member: string; title: string | null; document_date: string | null; content: string }) => {
       const snippet = this.generateSnippet(doc.content, tokens, 150);
       return {
         filename: doc.archive_filename,
