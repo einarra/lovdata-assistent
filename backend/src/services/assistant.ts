@@ -292,9 +292,15 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
         }
       }
 
+      logger.info('runAssistant: building evidence');
       const evidence = buildEvidence(result);
+      logger.info({ evidenceCount: evidence.length }, 'runAssistant: evidence built');
+      
       // Always update links for HTML content, regardless of agent usage
+      logger.info('runAssistant: updating links for HTML content');
       const evidenceWithUpdatedLinks = await updateLinksForHtmlContent(evidence, services);
+      logger.info({ updatedCount: evidenceWithUpdatedLinks.length }, 'runAssistant: links updated');
+      
       let agentEvidence: AgentEvidence[] = evidenceWithUpdatedLinks;
       const pagination = {
         page: result.page ?? page,
@@ -311,12 +317,17 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
             }
           : undefined;
 
+      logger.info('runAssistant: getting agent');
       const agent = getAgent();
+      logger.info({ hasAgent: !!agent }, 'runAssistant: agent obtained');
+      
       let agentOutput: AgentOutput | undefined;
       let usedAgent = false;
 
       if (agent && evidenceWithUpdatedLinks.length > 0) {
+        logger.info({ evidenceCount: evidenceWithUpdatedLinks.length }, 'runAssistant: hydrating evidence content for agent');
         agentEvidence = limitAgentEvidence(await hydrateEvidenceContent(evidenceWithUpdatedLinks, services));
+        logger.info({ hydratedCount: agentEvidence.length }, 'runAssistant: evidence content hydrated');
         try {
           const traceEvidenceSample = agentEvidence.slice(0, Math.min(agentEvidence.length, 5)).map(item => ({
             id: item.id,
@@ -325,6 +336,12 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
             snippet: item.snippet
           }));
 
+          logger.info({ 
+            question,
+            evidenceCount: agentEvidence.length,
+            sampleCount: traceEvidenceSample.length
+          }, 'runAssistant: calling OpenAI agent');
+          
           const agentCall = await withTrace<AgentOutput>(
             {
               name: 'agent.answer',
@@ -336,18 +353,31 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
               tags: ['assistant', 'openai'],
               getOutputs: (output: AgentOutput) => ({ answer: output.answer })
             },
-            async () => agent.generate({ question, evidence: agentEvidence, locale: options.locale })
+            async () => {
+              logger.info('runAssistant: calling agent.generate');
+              const result = await agent.generate({ question, evidence: agentEvidence, locale: options.locale });
+              logger.info({ 
+                answerLength: result.answer.length,
+                citationsCount: result.citations.length,
+                model: result.model
+              }, 'runAssistant: agent.generate completed');
+              return result;
+            }
           );
 
           agentOutput = agentCall.result;
           usedAgent = true;
+          logger.info('runAssistant: agent output obtained');
         } catch (error) {
           logger.error({ err: error }, 'OpenAI agent failed; falling back to heuristic summary');
         }
       }
 
+      logger.info({ usedAgent, hasAgentOutput: !!agentOutput }, 'runAssistant: building response');
+      
       let response: AssistantRunResponse;
       if (usedAgent && agentOutput) {
+        logger.info('runAssistant: building response with agent output');
         response = {
           answer: agentOutput.answer,
           evidence: evidenceWithUpdatedLinks,
@@ -362,7 +392,13 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
             processingTimeMs: 0
           }
         };
+        logger.info({ 
+          answerLength: response.answer.length,
+          evidenceCount: response.evidence.length,
+          citationsCount: response.citations.length
+        }, 'runAssistant: response built with agent output');
       } else {
+        logger.info('runAssistant: building fallback response');
         const fallbackAnswer = buildFallbackAnswer(question, evidenceWithUpdatedLinks, result.fallback?.provider ?? null);
         response = {
           answer: fallbackAnswer,
@@ -381,7 +417,14 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
             processingTimeMs: 0
           }
         };
+        logger.info({ 
+          answerLength: response.answer.length,
+          evidenceCount: response.evidence.length,
+          citationsCount: response.citations.length
+        }, 'runAssistant: fallback response built');
       }
+      
+      logger.info('runAssistant: response prepared, returning');
 
       const pipelineResult: AssistantPipelineResult = {
         response,
@@ -490,16 +533,25 @@ async function updateLinksForHtmlContent(evidence: AgentEvidence[], services: Se
 }
 
 async function hydrateEvidenceContent(evidence: AgentEvidence[], services: ServiceRegistry): Promise<AgentEvidence[]> {
+  logger.info({ evidenceCount: evidence.length }, 'hydrateEvidenceContent: starting');
+  
   const lovdataClient = services.lovdata;
   const archiveStore = services.archive ?? null;
   if (!lovdataClient && !archiveStore) {
+    logger.info('hydrateEvidenceContent: no services available, returning evidence as-is');
     return evidence;
   }
 
   const contentCache = new Map<string, string>();
+  
+  logger.info({ 
+    hasArchive: !!archiveStore,
+    hasLovdata: !!lovdataClient
+  }, 'hydrateEvidenceContent: processing evidence items');
 
-  return Promise.all(
-    evidence.map(async item => {
+  const results = await Promise.all(
+    evidence.map(async (item, index) => {
+      logger.debug({ index, evidenceId: item.id }, 'hydrateEvidenceContent: processing item');
       const metadata = item.metadata ?? {};
       const filename = typeof metadata.filename === 'string' ? metadata.filename : undefined;
       const member = typeof metadata.member === 'string' ? metadata.member : undefined;
@@ -577,6 +629,13 @@ async function hydrateEvidenceContent(evidence: AgentEvidence[], services: Servi
       }
     })
   );
+  
+  logger.info({ 
+    processedCount: results.length,
+    cacheSize: contentCache.size
+  }, 'hydrateEvidenceContent: completed');
+  
+  return results;
 }
 
 function limitAgentEvidence(items: AgentEvidence[]): AgentEvidence[] {
