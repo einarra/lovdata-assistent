@@ -1,6 +1,7 @@
 import type { SkillContext, SkillIO, SkillOutput } from '../skills-core.js';
 import { SerperClient } from '../../services/serperClient.js';
 import { env } from '../../config/env.js';
+import { logger } from '../../logger.js';
 
 type SerperSkillInput = {
   action?: 'search';
@@ -23,11 +24,22 @@ export async function guard({ io }: { ctx: SkillContext; io: SkillIO }) {
 }
 
 export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutput> {
+  logger.info('lovdata-serper: execute starting');
+  
   const services = (ctx.services ?? {}) as Services;
   const client = services.serper;
   const input = normalizeInput(io.input);
   const site = input.site ?? env.SERPER_SITE_FILTER;
+  
+  logger.info({ 
+    hasClient: !!client,
+    query: input.query,
+    site,
+    hasApiKey: !!env.SERPER_API_KEY
+  }, 'lovdata-serper: checking client configuration');
+  
   if (!client) {
+    logger.warn('lovdata-serper: client not available, returning unconfigured message');
     return {
       result: {
         message: 'Serper API-nøkkel er ikke konfigurert. Sett SERPER_API_KEY for å aktivere nettsøk.',
@@ -42,12 +54,27 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
     };
   }
 
-  const response = await client.search(input.query, {
-    num: input.num,
-    gl: input.gl,
-    hl: input.hl,
-    site
-  });
+  logger.info({ query: input.query, site }, 'lovdata-serper: calling client.search');
+  
+  let response;
+  try {
+    response = await client.search(input.query, {
+      num: input.num,
+      gl: input.gl,
+      hl: input.hl,
+      site
+    });
+    logger.info({ 
+      hasOrganic: !!response.organic,
+      organicCount: Array.isArray(response.organic) ? response.organic.length : 0
+    }, 'lovdata-serper: client.search completed');
+  } catch (searchError) {
+    logger.error({ 
+      err: searchError,
+      stack: searchError instanceof Error ? searchError.stack : undefined
+    }, 'lovdata-serper: client.search failed');
+    throw searchError;
+  }
 
   const organic = (response.organic ?? []).map(item => ({
     title: item.title ?? null,
@@ -55,6 +82,8 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
     snippet: item.snippet ?? null,
     date: item.date ?? null
   }));
+
+  logger.info({ organicCount: organic.length }, 'lovdata-serper: processing results');
 
   return {
     result: {

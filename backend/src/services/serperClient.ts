@@ -39,20 +39,36 @@ export class SerperClient {
       hl: options.hl ?? 'no'
     };
 
-    const response = await fetch(this.baseUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-API-KEY': this.apiKey!
-      },
-      body: JSON.stringify(payload)
-    });
+    // Add timeout to prevent hanging (30 seconds max)
+    const timeoutMs = 30000;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`Serper search failed (${response.status}): ${body}`);
+    try {
+      const response = await fetch(this.baseUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-KEY': this.apiKey!
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const body = await response.text();
+        throw new Error(`Serper search failed (${response.status}): ${body}`);
+      }
+
+      return (await response.json()) as SerperResponse;
+    } catch (error) {
+      clearTimeout(timeoutId);
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error(`Serper search timed out after ${timeoutMs}ms`);
+      }
+      throw error;
     }
-
-    return (await response.json()) as SerperResponse;
   }
 }
