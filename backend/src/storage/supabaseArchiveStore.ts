@@ -587,27 +587,62 @@ export class SupabaseArchiveStore {
     this.validateFilename(filename);
     this.validateMember(member);
 
-    const { data, error } = await this.supabase
-      .from('lovdata_documents')
-      .select('content')
-      .eq('archive_filename', filename)
-      .eq('member', member)
-      .maybeSingle();
+    // Add timeout to prevent hanging (5 seconds)
+    const timeoutMs = 5000;
+    const fetchStartTime = Date.now();
+    
+    this.logs.info({ filename, member, timeoutMs }, 'getDocumentContentAsync: starting fetch with timeout');
 
-    if (error) {
-      fetchTimer.end({ success: false, found: false, error: error.message });
-      this.logs.error({ err: error, filename, member }, 'Failed to fetch document content');
+    const queryPromise = (async () => {
+      try {
+        this.logs.info({ filename, member }, 'getDocumentContentAsync: executing Supabase query');
+        const { data, error } = await this.supabase
+          .from('lovdata_documents')
+          .select('content')
+          .eq('archive_filename', filename)
+          .eq('member', member)
+          .maybeSingle();
+
+        const fetchDuration = Date.now() - fetchStartTime;
+        this.logs.info({ fetchDurationMs: fetchDuration, hasError: !!error, hasData: !!data }, 'getDocumentContentAsync: query completed');
+
+        if (error) {
+          fetchTimer.end({ success: false, found: false, error: error.message });
+          this.logs.error({ err: error, filename, member }, 'Failed to fetch document content');
+          return null;
+        }
+
+        if (!data) {
+          fetchTimer.end({ success: true, found: false });
+          return null;
+        }
+
+        const contentLength = data.content?.length ?? 0;
+        fetchTimer.end({ success: true, found: true, contentLength });
+        return data.content;
+      } catch (queryError) {
+        const fetchDuration = Date.now() - fetchStartTime;
+        this.logs.error({ err: queryError, fetchDurationMs: fetchDuration }, 'getDocumentContentAsync: query error');
+        throw queryError;
+      }
+    })();
+
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => {
+        const elapsed = Date.now() - fetchStartTime;
+        this.logs.error({ elapsedMs: elapsed, timeoutMs, filename, member }, 'getDocumentContentAsync: fetch timed out');
+        reject(new Error(`Document content fetch timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+    });
+
+    try {
+      const result = await Promise.race([queryPromise, timeoutPromise]);
+      return result;
+    } catch (timeoutError) {
+      fetchTimer.end({ success: false, found: false, error: timeoutError instanceof Error ? timeoutError.message : String(timeoutError) });
+      // Return null on timeout - the calling code should handle this gracefully
       return null;
     }
-
-    if (!data) {
-      fetchTimer.end({ success: true, found: false });
-      return null;
-    }
-
-    const contentLength = data.content?.length ?? 0;
-    fetchTimer.end({ success: true, found: true, contentLength });
-    return data.content;
   }
 
   getDocument(_filename: string, _member: string): ArchiveDocumentRecord | null {
