@@ -39,11 +39,26 @@ export async function searchLovdataPublicData(options: {
     offset
   });
 
+  logger.info({ query: query.substring(0, 100), page, pageSize }, 'searchLovdataPublicData: calling store.searchAsync');
+  
   // Use async search method for Supabase
-  const result: StoreSearchResult = await store.searchAsync(query, {
-    limit: pageSize,
-    offset
-  });
+  let result: StoreSearchResult;
+  try {
+    result = await store.searchAsync(query, {
+      limit: pageSize,
+      offset
+    });
+    logger.info({ 
+      hitsCount: result.hits.length,
+      total: result.total
+    }, 'searchLovdataPublicData: store.searchAsync completed');
+  } catch (searchError) {
+    logger.error({ 
+      err: searchError,
+      query: query.substring(0, 100)
+    }, 'searchLovdataPublicData: store.searchAsync failed');
+    throw searchError;
+  }
 
   const searchedFiles = Array.from(new Set(result.hits.map(hit => hit.filename)));
   const totalPages = result.total === 0 ? 1 : Math.max(1, Math.ceil(result.total / pageSize));

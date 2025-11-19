@@ -121,12 +121,17 @@ export class SkillOrchestrator {
       };
     }
 
+    // Import logger here to avoid circular dependency
+    const { logger } = await import('../logger.js');
+    logger.info({ skillName: skill.name, score }, 'SkillOrchestrator: executing skill');
+    
     return this.executeSkill(skill, io, ctx);
   }
 
   private async executeSkill(skill: Skill, io: SkillIO, ctx: SkillContext): Promise<SkillOutput> {
     try {
       if (skill.guard) {
+        this.options.observers?.forEach(observer => observer.onExecuteStart?.({ skill, io, ctx }));
         await skill.guard({ io, ctx });
       }
       this.options.observers?.forEach(observer => observer.onExecuteStart?.({ skill, io, ctx }));
