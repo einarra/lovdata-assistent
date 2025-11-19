@@ -349,18 +349,21 @@ export class SupabaseArchiveStore {
           console.log(`[SupabaseArchiveStore] About to execute query builder...`);
           this.logs.info('searchAsync: executing query builder');
           
-          // Wrap the query builder in a Promise to handle errors properly
-          const queryExecutionPromise = Promise.resolve(queryBuilder).then(r => {
-            const raceDuration = Date.now() - raceStartTime;
-            console.log(`[SupabaseArchiveStore] Query builder completed after ${raceDuration}ms`);
-            this.logs.info({ raceDurationMs: raceDuration, resolvedBy: 'query' }, 'searchAsync: internal Promise.race resolved - query won');
-            return r;
-          }).catch((err: unknown) => {
-            const raceDuration = Date.now() - raceStartTime;
-            console.log(`[SupabaseArchiveStore] Query builder failed after ${raceDuration}ms:`, err instanceof Error ? err.message : String(err));
-            this.logs.error({ err, raceDurationMs: raceDuration }, 'searchAsync: query builder failed');
-            throw err;
-          });
+          // Execute the query builder directly - Supabase queries are lazy and only execute when awaited
+          const queryExecutionPromise = (async () => {
+            try {
+              const result = await queryBuilder;
+              const raceDuration = Date.now() - raceStartTime;
+              console.log(`[SupabaseArchiveStore] Query builder completed after ${raceDuration}ms`);
+              this.logs.info({ raceDurationMs: raceDuration, resolvedBy: 'query' }, 'searchAsync: internal Promise.race resolved - query won');
+              return result;
+            } catch (err: unknown) {
+              const raceDuration = Date.now() - raceStartTime;
+              console.log(`[SupabaseArchiveStore] Query builder failed after ${raceDuration}ms:`, err instanceof Error ? err.message : String(err));
+              this.logs.error({ err, raceDurationMs: raceDuration }, 'searchAsync: query builder failed');
+              throw err;
+            }
+          })();
           
           console.log(`[SupabaseArchiveStore] Starting internal Promise.race, queryTimeoutMs: ${queryTimeoutMs}`);
           const result = await Promise.race([
