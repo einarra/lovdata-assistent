@@ -288,7 +288,12 @@ export class SupabaseArchiveStore {
 
     // Single optimized query with count
     const queryTimer = new Timer('db_text_search', this.logs, { tsQuery, limit, offset });
-    const { data, error, count } = await this.supabase
+    
+    this.logs.info({ tsQuery, limit, offset }, 'searchAsync: executing database query');
+    
+    // Add timeout to prevent hanging (20 seconds max - Vercel functions have 60s limit)
+    const timeoutMs = 20000;
+    const queryPromise = this.supabase
       .from('lovdata_documents')
       .select('archive_filename, member, title, document_date, content', { count: 'exact' })
       .textSearch('tsv_content', tsQuery, {
@@ -297,6 +302,33 @@ export class SupabaseArchiveStore {
       })
       .order('id', { ascending: true })
       .range(offset, offset + limit - 1);
+    
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => {
+        reject(new Error(`Database query timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+    });
+    
+    let data, error, count;
+    try {
+      this.logs.info('searchAsync: waiting for query result');
+      const result = await Promise.race([queryPromise, timeoutPromise]);
+      this.logs.info({ 
+        hasData: !!result.data,
+        dataLength: result.data?.length ?? 0,
+        hasError: !!result.error,
+        count: result.count
+      }, 'searchAsync: query completed');
+      data = result.data;
+      error = result.error;
+      count = result.count;
+    } catch (timeoutError) {
+      queryTimer.end({ success: false, error: timeoutError instanceof Error ? timeoutError.message : String(timeoutError) });
+      searchTimer.end({ success: false, error: 'timeout' });
+      this.logs.error({ err: timeoutError, query, tsQuery, limit, offset }, 'Database query timed out');
+      return { hits: [], total: 0 };
+    }
+    
     queryTimer.end({ resultCount: data?.length ?? 0, totalCount: count ?? 0 });
 
     if (error) {
