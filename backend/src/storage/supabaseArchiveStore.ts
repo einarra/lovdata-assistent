@@ -303,6 +303,7 @@ export class SupabaseArchiveStore {
     const queryPromise = (async () => {
       try {
         this.logs.info('searchAsync: starting Supabase query');
+        console.log(`[SupabaseArchiveStore] Starting query: ${tsQuery}, limit: ${limit}, offset: ${offset}`);
         this.logs.info({ 
           table: 'lovdata_documents',
           tsQuery,
@@ -422,34 +423,44 @@ export class SupabaseArchiveStore {
       // Also log after 1, 3, and 5 seconds to track progress
       setTimeout(() => {
         const elapsed = Date.now() - queryStartTime;
+        console.log(`[SupabaseArchiveStore] 1 second check - elapsed: ${elapsed}ms`);
         this.logs.info({ elapsedMs: elapsed }, 'searchAsync: 1 second check - function still running');
       }, 1000);
       
       setTimeout(() => {
         const elapsed = Date.now() - queryStartTime;
+        console.log(`[SupabaseArchiveStore] 3 second check - elapsed: ${elapsed}ms`);
         this.logs.info({ elapsedMs: elapsed }, 'searchAsync: 3 second check - function still running');
       }, 3000);
       
       setTimeout(() => {
         const elapsed = Date.now() - queryStartTime;
+        console.log(`[SupabaseArchiveStore] 5 second check - elapsed: ${elapsed}ms`);
         this.logs.info({ elapsedMs: elapsed }, 'searchAsync: 5 second check - function still running');
       }, 5000);
       
       this.logs.info('searchAsync: progress interval and timed checks set up');
       
       // Use a wrapper that ensures timeout always triggers
+      console.log(`[SupabaseArchiveStore] Starting Promise.race for query, timeout: ${timeoutMs}ms`);
       const racePromise = Promise.race([
         queryPromise.then(result => {
+          const elapsed = Date.now() - queryStartTime;
+          console.log(`[SupabaseArchiveStore] Query promise resolved after ${elapsed}ms`);
           this.logs.info('searchAsync: query promise resolved first');
           return { type: 'success' as const, result };
         }),
         timeoutPromise.then(() => {
+          const elapsed = Date.now() - queryStartTime;
+          console.log(`[SupabaseArchiveStore] Timeout promise resolved after ${elapsed}ms`);
           this.logs.info('searchAsync: timeout promise resolved first');
           return { type: 'timeout' as const };
         })
       ]);
       
+      console.log(`[SupabaseArchiveStore] Awaiting Promise.race result...`);
       const raceResult = await racePromise;
+      console.log(`[SupabaseArchiveStore] Promise.race completed, result type: ${raceResult.type}`);
       clearInterval(progressInterval);
       this.logs.info({ resultType: raceResult.type }, 'searchAsync: Promise.race completed, cleaning up interval');
       
