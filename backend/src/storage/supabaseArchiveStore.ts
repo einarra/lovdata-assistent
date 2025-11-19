@@ -291,9 +291,10 @@ export class SupabaseArchiveStore {
     
     this.logs.info({ tsQuery, limit, offset }, 'searchAsync: executing database query');
     
-    // Add timeout to prevent hanging (8 seconds max - Vercel Hobby has 10s limit, Pro has 60s)
-    // Using 8s to ensure timeout triggers before Vercel kills the function
-    const timeoutMs = 8000;
+    // Add timeout to prevent hanging (5 seconds max - Vercel Hobby has 10s limit)
+    // Using 5s to ensure timeout triggers well before Vercel kills the function
+    // This gives us time to handle the timeout and return a response
+    const timeoutMs = 5000;
     let timeoutHandle: NodeJS.Timeout | null = null;
     let queryAborted = false;
     const queryStartTime = Date.now();
@@ -351,22 +352,34 @@ export class SupabaseArchiveStore {
     
     let data, error, count;
     try {
-      this.logs.info('searchAsync: waiting for query result with timeout');
+      this.logs.info({ queryStartTime, timeoutMs }, 'searchAsync: waiting for query result with timeout');
+      
+      // Add a safety check - log periodically to see if we're still waiting
+      // Use info level to ensure it shows up in Vercel logs
+      // Start logging immediately (don't wait for first interval)
+      const progressInterval = setInterval(() => {
+        const elapsed = Date.now() - queryStartTime;
+        this.logs.info({ elapsedMs: elapsed, timeoutMs }, 'searchAsync: still waiting for query (progress check)');
+      }, 1000);
+      
+      // Log immediately
+      this.logs.info({ elapsedMs: 0 }, 'searchAsync: progress check - starting Promise.race');
       
       // Use a wrapper that ensures timeout always triggers
       const racePromise = Promise.race([
-        queryPromise.then(result => ({ type: 'success' as const, result })),
-        timeoutPromise.then(() => ({ type: 'timeout' as const }))
+        queryPromise.then(result => {
+          this.logs.info('searchAsync: query promise resolved first');
+          return { type: 'success' as const, result };
+        }),
+        timeoutPromise.then(() => {
+          this.logs.info('searchAsync: timeout promise resolved first');
+          return { type: 'timeout' as const };
+        })
       ]);
-      
-      // Add a safety check - log periodically to see if we're still waiting
-      const progressInterval = setInterval(() => {
-        const elapsed = Date.now() - queryStartTime;
-        this.logs.debug({ elapsedMs: elapsed }, 'searchAsync: still waiting for query');
-      }, 1000);
       
       const raceResult = await racePromise;
       clearInterval(progressInterval);
+      this.logs.info({ resultType: raceResult.type }, 'searchAsync: Promise.race completed, cleaning up interval');
       
       if (timeoutHandle) {
         clearTimeout(timeoutHandle);
