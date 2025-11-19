@@ -62,11 +62,33 @@ export class SerperClient {
       console.log(`[SerperClient] URL: ${this.baseUrl}, timeout: ${timeoutMs}ms`);
       console.log(`[SerperClient] About to call fetch with AbortController signal`);
       
-      // Add progress checks while waiting for fetch
-      const progressCheckInterval = setInterval(() => {
+      // Add progress checks while waiting for fetch - set up BEFORE fetch to ensure they run
+      let progressCheckInterval: NodeJS.Timeout | null = null;
+      
+      // Start progress checks immediately
+      console.log(`[SerperClient] Setting up progress checks...`);
+      progressCheckInterval = setInterval(() => {
         const elapsed = Date.now() - startTime;
         console.log(`[SerperClient] Still waiting for response... elapsed: ${elapsed}ms, timeout at: ${timeoutMs}ms`);
-      }, 2000); // Check every 2 seconds
+      }, 1000); // Check every 1 second for faster feedback
+      
+      // Also add immediate checks at 1, 2, 3 seconds
+      setTimeout(() => {
+        const elapsed = Date.now() - startTime;
+        console.log(`[SerperClient] 1 second check - elapsed: ${elapsed}ms`);
+      }, 1000);
+      
+      setTimeout(() => {
+        const elapsed = Date.now() - startTime;
+        console.log(`[SerperClient] 2 second check - elapsed: ${elapsed}ms`);
+      }, 2000);
+      
+      setTimeout(() => {
+        const elapsed = Date.now() - startTime;
+        console.log(`[SerperClient] 3 second check - elapsed: ${elapsed}ms`);
+      }, 3000);
+      
+      console.log(`[SerperClient] Progress checks set up, calling fetch...`);
       
       const fetchPromise = fetch(this.baseUrl, {
         method: 'POST',
@@ -78,25 +100,14 @@ export class SerperClient {
         signal: controller.signal
       }).finally(() => {
         // Clear progress checks when fetch completes (success or error)
-        clearInterval(progressCheckInterval);
+        if (progressCheckInterval) {
+          clearInterval(progressCheckInterval);
+          console.log(`[SerperClient] Progress checks cleared`);
+        }
       });
       
       console.log(`[SerperClient] Fetch promise created, awaiting response...`);
-      
-      // Wrap in Promise.race to ensure timeout always triggers
-      const responsePromise = fetchPromise;
-      const timeoutWrapper = new Promise<Response>((_, reject) => {
-        // The timeout is already handled by AbortController, but this ensures we catch it
-        setTimeout(() => {
-          const elapsed = Date.now() - startTime;
-          if (elapsed >= timeoutMs - 100) { // Give a 100ms buffer
-            console.log(`[SerperClient] Timeout wrapper triggered after ${elapsed}ms`);
-            reject(new Error(`Fetch timeout after ${timeoutMs}ms`));
-          }
-        }, timeoutMs + 100);
-      });
-      
-      const response = await Promise.race([responsePromise, timeoutWrapper]);
+      const response = await fetchPromise;
       
       clearTimeout(timeoutId);
       const elapsed = Date.now() - startTime;
