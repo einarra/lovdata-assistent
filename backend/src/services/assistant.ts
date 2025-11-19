@@ -87,40 +87,69 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
       } as const;
 
       logger.info('runAssistant: calling skill.searchPublicData');
-      const { result: skillOutput } = await withTrace(
-        {
-          name: 'skill.searchPublicData',
-          runType: 'tool',
-          inputs: {
-            action: 'searchPublicData',
-            query: question,
-            page,
-            pageSize
-          },
-          tags: ['skill', 'lovdata'],
-          getOutputs: (output: any) => ({
-            hits: Array.isArray((output.result as LovdataSkillSearchResult)?.hits)
-              ? (output.result as LovdataSkillSearchResult).hits?.length
-              : undefined
-          })
-        },
-        async () =>
-          orchestrator.run(
-            {
-              input: {
-                action: 'searchPublicData',
-                query: question,
-                latest: DEFAULT_LATEST_ARCHIVES,
-                maxHits: DEFAULT_MAX_HITS,
-                page,
-                pageSize
-              }
+      let skillOutput: any;
+      try {
+        const traceResult = await withTrace(
+          {
+            name: 'skill.searchPublicData',
+            runType: 'tool',
+            inputs: {
+              action: 'searchPublicData',
+              query: question,
+              page,
+              pageSize
             },
-            ctx
-          )
-      );
+            tags: ['skill', 'lovdata'],
+            getOutputs: (output: any) => ({
+              hits: Array.isArray((output.result as LovdataSkillSearchResult)?.hits)
+                ? (output.result as LovdataSkillSearchResult).hits?.length
+                : undefined
+            })
+          },
+          async () => {
+            logger.info('runAssistant: calling orchestrator.run');
+            const result = await orchestrator.run(
+              {
+                input: {
+                  action: 'searchPublicData',
+                  query: question,
+                  latest: DEFAULT_LATEST_ARCHIVES,
+                  maxHits: DEFAULT_MAX_HITS,
+                  page,
+                  pageSize
+                }
+              },
+              ctx
+            );
+            logger.info({ 
+              hasResult: !!result,
+              resultType: typeof result,
+              resultKeys: result && typeof result === 'object' ? Object.keys(result) : []
+            }, 'runAssistant: orchestrator.run completed');
+            return result;
+          }
+        );
+        skillOutput = traceResult;
+        logger.info('runAssistant: skill.searchPublicData trace completed');
+      } catch (skillError) {
+        logger.error({ 
+          err: skillError,
+          stack: skillError instanceof Error ? skillError.stack : undefined
+        }, 'runAssistant: skill.searchPublicData failed');
+        throw skillError;
+      }
+      
+      const { result: skillOutputResult } = skillOutput;
+      logger.info({ 
+        hasResult: !!skillOutputResult,
+        resultType: typeof skillOutputResult
+      }, 'runAssistant: extracted skill result');
 
-      const result = (skillOutput.result ?? {}) as LovdataSkillSearchResult;
+      const result = (skillOutputResult ?? {}) as LovdataSkillSearchResult;
+      logger.info({ 
+        hasHits: Array.isArray(result.hits),
+        hitsCount: Array.isArray(result.hits) ? result.hits.length : 0
+      }, 'runAssistant: processed skill result');
       let serperSkillMeta: Record<string, unknown> | undefined;
 
       const primaryHits = Array.isArray(result.hits) ? result.hits.length : 0;
