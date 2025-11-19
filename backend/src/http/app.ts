@@ -191,20 +191,37 @@ export function createApp() {
       }
       
       // Execute assistant run
-      const output = await timeOperation(
-        'assistant_run',
-        () => runAssistant(payload, userId ? { userId } : undefined),
-        logger,
-        { endpoint: '/assistant/run', userId, questionLength: payload.question.length }
-      );
+      logger.info({ question: payload.question }, 'Assistant run: starting execution');
       
-      logger.info({
-        answerLength: output.answer.length,
-        evidenceCount: output.evidence.length,
-        usedAgent: output.metadata.usedAgent
-      }, 'Assistant run: completed successfully');
+      let output;
+      try {
+        output = await timeOperation(
+          'assistant_run',
+          () => runAssistant(payload, userId ? { userId } : undefined),
+          logger,
+          { endpoint: '/assistant/run', userId, questionLength: payload.question.length }
+        );
+        
+        logger.info({
+          answerLength: output.answer.length,
+          evidenceCount: output.evidence.length,
+          usedAgent: output.metadata.usedAgent
+        }, 'Assistant run: completed successfully');
+      } catch (runError) {
+        logger.error({ 
+          err: runError,
+          question: payload.question,
+          stack: runError instanceof Error ? runError.stack : undefined
+        }, 'Assistant run: execution failed');
+        throw runError;
+      }
       
-      res.json(output);
+      // Ensure response is sent
+      if (!res.headersSent) {
+        res.json(output);
+      } else {
+        logger.warn('Assistant run: response already sent, skipping res.json()');
+      }
     } catch (error) {
       logger.error({ 
         err: error,

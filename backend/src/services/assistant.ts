@@ -56,6 +56,8 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
   const page = options.page && options.page > 0 ? Math.floor(options.page) : 1;
   const pageSize = options.pageSize && options.pageSize > 0 ? Math.min(Math.floor(options.pageSize), 20) : DEFAULT_PAGE_SIZE;
 
+  logger.info({ question, page, pageSize }, 'runAssistant: starting');
+
   const { result: pipeline } = await withTrace<AssistantPipelineResult>(
     {
       name: 'assistant.run',
@@ -68,8 +70,15 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
       })
     },
     async () => {
+      logger.info('runAssistant: getting orchestrator and services');
       const orchestrator = await getOrchestrator();
       const services = getServices();
+      logger.info({ 
+        hasArchive: !!services.archive,
+        hasLovdata: !!services.lovdata,
+        hasSerper: !!services.serper
+      }, 'runAssistant: services obtained');
+      
       const ctx = {
         now: new Date(),
         locale: options.locale,
@@ -77,6 +86,7 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
         scratch: {}
       } as const;
 
+      logger.info('runAssistant: calling skill.searchPublicData');
       const { result: skillOutput } = await withTrace(
         {
           name: 'skill.searchPublicData',
