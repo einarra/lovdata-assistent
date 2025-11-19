@@ -492,14 +492,27 @@ function isHtmlContent(text: string): boolean {
 }
 
 async function updateLinksForHtmlContent(evidence: AgentEvidence[], services: ServiceRegistry): Promise<AgentEvidence[]> {
+  logger.info({ evidenceCount: evidence.length }, 'updateLinksForHtmlContent: starting');
+  
   const lovdataClient = services.lovdata;
   const archiveStore = services.archive ?? null;
   if (!lovdataClient && !archiveStore) {
+    logger.info('updateLinksForHtmlContent: no services available, returning evidence as-is');
     return evidence;
   }
 
-  return Promise.all(
-    evidence.map(async item => {
+  logger.info({ 
+    hasArchive: !!archiveStore,
+    hasLovdata: !!lovdataClient
+  }, 'updateLinksForHtmlContent: processing evidence items');
+
+  // Add timeout for each document fetch (5 seconds per item)
+  const documentFetchTimeoutMs = 5000;
+  
+  const results = await Promise.all(
+    evidence.map(async (item, index) => {
+      logger.debug({ index, evidenceId: item.id }, 'updateLinksForHtmlContent: processing item');
+      
       const metadata = item.metadata ?? {};
       const filename = typeof metadata.filename === 'string' ? metadata.filename : undefined;
       const member = typeof metadata.member === 'string' ? metadata.member : undefined;
@@ -515,14 +528,40 @@ async function updateLinksForHtmlContent(evidence: AgentEvidence[], services: Se
       }
 
       try {
-        // Check if content is HTML
+        // Check if content is HTML with timeout
         let fullText: string | null = null;
-        if (archiveStore) {
-          fullText = await archiveStore.getDocumentContentAsync(filename, member);
-        }
-        if (!fullText && lovdataClient) {
-          const result = await lovdataClient.extractXml(filename, member);
-          fullText = result.text;
+        
+        const fetchPromise = (async () => {
+          if (archiveStore) {
+            logger.debug({ filename, member }, 'updateLinksForHtmlContent: fetching from archive store');
+            return await archiveStore.getDocumentContentAsync(filename, member);
+          }
+          if (lovdataClient) {
+            logger.debug({ filename, member }, 'updateLinksForHtmlContent: fetching from lovdata client');
+            const result = await lovdataClient.extractXml(filename, member);
+            return result.text;
+          }
+          return null;
+        })();
+        
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => {
+            reject(new Error(`Document fetch timed out after ${documentFetchTimeoutMs}ms for ${filename}/${member}`));
+          }, documentFetchTimeoutMs);
+        });
+        
+        try {
+          fullText = await Promise.race([fetchPromise, timeoutPromise]);
+          logger.debug({ filename, member, hasText: !!fullText, textLength: fullText?.length ?? 0 }, 'updateLinksForHtmlContent: document fetched');
+        } catch (fetchError) {
+          logger.warn({ 
+            err: fetchError,
+            filename,
+            member,
+            evidenceId: item.id
+          }, 'updateLinksForHtmlContent: document fetch failed or timed out, skipping HTML check');
+          // Continue without updating the link if fetch fails
+          return item;
         }
 
         if (fullText && isHtmlContent(fullText) && member.toLowerCase().endsWith('.xml')) {
@@ -533,6 +572,7 @@ async function updateLinksForHtmlContent(evidence: AgentEvidence[], services: Se
           updatedMetadata.fileExtension = '.html';
           updatedMetadata.member = htmlMember;
 
+          logger.debug({ filename, member, htmlMember }, 'updateLinksForHtmlContent: updated link to HTML');
           return {
             ...item,
             link: updatedLink,
@@ -540,12 +580,25 @@ async function updateLinksForHtmlContent(evidence: AgentEvidence[], services: Se
           };
         }
       } catch (error) {
-        logger.warn({ err: error, filename, member, evidenceId: item.id }, 'Failed to update link for HTML content');
+        logger.warn({ 
+          err: error,
+          stack: error instanceof Error ? error.stack : undefined,
+          filename, 
+          member, 
+          evidenceId: item.id 
+        }, 'updateLinksForHtmlContent: error updating link for HTML content');
       }
 
       return item;
     })
   );
+  
+  logger.info({ 
+    processedCount: results.length,
+    inputCount: evidence.length
+  }, 'updateLinksForHtmlContent: completed');
+  
+  return results;
 }
 
 async function hydrateEvidenceContent(evidence: AgentEvidence[], services: ServiceRegistry): Promise<AgentEvidence[]> {
