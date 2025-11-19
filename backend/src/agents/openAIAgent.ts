@@ -39,18 +39,56 @@ export class OpenAIAgent implements Agent {
 
   async generate(input: AgentInput): Promise<AgentOutput> {
     const prompt = buildUserPrompt(input.question, input.evidence);
+    
+    logger.info({ 
+      question: input.question,
+      evidenceCount: input.evidence.length,
+      model: this.model
+    }, 'OpenAIAgent.generate: starting API call');
 
-    const response = await this.client.chat.completions.create({
-      model: this.model,
-      temperature: this.temperature,
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: prompt }
-      ],
-      response_format: { type: 'json_object' }
-    });
+    // Add timeout to prevent hanging (30 seconds max)
+    const timeoutMs = 30000;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    let response;
+    try {
+      logger.info('OpenAIAgent.generate: calling OpenAI API');
+      response = await this.client.chat.completions.create(
+        {
+          model: this.model,
+          temperature: this.temperature,
+          messages: [
+            { role: 'system', content: SYSTEM_PROMPT },
+            { role: 'user', content: prompt }
+          ],
+          response_format: { type: 'json_object' }
+        },
+        {
+          signal: controller.signal
+        }
+      );
+      clearTimeout(timeoutId);
+      logger.info({ 
+        hasResponse: !!response,
+        choicesCount: response?.choices?.length ?? 0
+      }, 'OpenAIAgent.generate: OpenAI API call completed');
+    } catch (error) {
+      clearTimeout(timeoutId);
+      if (error instanceof Error && error.name === 'AbortError') {
+        logger.error({ timeoutMs }, 'OpenAIAgent.generate: API call timed out');
+        throw new Error(`OpenAI API call timed out after ${timeoutMs}ms`);
+      }
+      logger.error({ 
+        err: error,
+        stack: error instanceof Error ? error.stack : undefined
+      }, 'OpenAIAgent.generate: API call failed');
+      throw error;
+    }
 
     const raw = response.choices[0]?.message?.content ?? '';
+    logger.info({ rawLength: raw.length }, 'OpenAIAgent.generate: parsing response');
+    
     const parsed = parseAgentJson(raw);
     if (!parsed.answer) {
       logger.warn({ raw }, 'OpenAI agent returned empty answer; falling back to raw text');
@@ -69,6 +107,11 @@ export class OpenAIAgent implements Agent {
               Boolean(entry)
           )
       : undefined;
+
+    logger.info({ 
+      answerLength: parsed.answer.trim().length,
+      citationsCount: citations?.length ?? 0
+    }, 'OpenAIAgent.generate: response parsed successfully');
 
     return {
       answer: parsed.answer.trim(),
