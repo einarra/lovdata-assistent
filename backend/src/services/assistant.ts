@@ -190,7 +190,9 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
 
       // Always run Serper when available to include both Lovdata and web results
       if (services.serper) {
+        logger.info({ question, hasSerper: !!services.serper }, 'runAssistant: starting Serper skill execution');
         try {
+          logger.info('runAssistant: calling Serper orchestrator.run');
           const { result: serperSkillOutput } = await withTrace<SkillOutput>(
             {
               name: 'skill.serperSearch',
@@ -220,6 +222,11 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
                 ctx
               )
           );
+          
+          logger.info({ 
+            hasResult: !!serperSkillOutput,
+            resultType: typeof serperSkillOutput
+          }, 'runAssistant: Serper orchestrator.run completed');
 
           const serperResult = (serperSkillOutput.result ?? {}) as {
             organic?: Array<{
@@ -286,10 +293,19 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
                 site: serperResult.site ?? null,
                 organicResults: organicResults.length
               } as Record<string, unknown>);
+            logger.info({ 
+              organicResultsCount: organicResults.length,
+              providerCombined
+            }, 'runAssistant: Serper results processed');
+          } else {
+            logger.info('runAssistant: Serper returned no organic results');
           }
         } catch (error) {
-          logger.error({ err: error }, 'Serper skill execution failed');
+          logger.error({ err: error, stack: error instanceof Error ? error.stack : undefined }, 'Serper skill execution failed');
         }
+        logger.info('runAssistant: Serper skill execution completed');
+      } else {
+        logger.info('runAssistant: Serper service not available, skipping');
       }
 
       logger.info('runAssistant: building evidence');
