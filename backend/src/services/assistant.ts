@@ -877,7 +877,9 @@ function buildXmlViewerUrl(
   }
 
   try {
-    const url = new URL('/documents/xml', env.PUBLIC_API_BASE_URL);
+    // In Vercel, all API routes must be under /api prefix
+    // So the path should be /api/documents/xml, not /documents/xml
+    const url = new URL('/api/documents/xml', env.PUBLIC_API_BASE_URL);
     url.searchParams.set('filename', filename);
     url.searchParams.set('member', member);
     if (options?.format) {
