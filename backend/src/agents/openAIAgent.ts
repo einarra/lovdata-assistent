@@ -46,10 +46,10 @@ export class OpenAIAgent implements Agent {
       model: this.model
     }, 'OpenAIAgent.generate: starting API call');
 
-    // Add timeout to prevent hanging (3 seconds max - we've already used ~2.5s, so keep it very short)
+    // Add timeout to prevent hanging (1.5 seconds max - we've already used ~3.5s, so keep it very short)
     // This ensures we have time to return a response before Vercel kills the function
-    // Using 3 seconds to match the database query timeout pattern
-    const timeoutMs = 3000;
+    // Using 1.5 seconds to be extremely aggressive and trigger before Vercel kills us
+    const timeoutMs = 1500;
     const startTime = Date.now();
     const controller = new AbortController();
 
@@ -60,8 +60,8 @@ export class OpenAIAgent implements Agent {
       console.log(`[OpenAIAgent] Still waiting for OpenAI response... elapsed: ${elapsed}ms, timeout at: ${timeoutMs}ms`);
     }, 1000); // Check every 1 second
     
-    // Also add specific checks at 1, 2 seconds (timeout is 3s)
-    const specificChecks = [1, 2].map(seconds => {
+    // No specific checks needed (timeout is 1.5s, very short)
+    const specificChecks: NodeJS.Timeout[] = [];
       return setTimeout(() => {
         const elapsed = Date.now() - startTime;
         console.log(`[OpenAIAgent] ${seconds} second check - elapsed: ${elapsed}ms`);
@@ -105,11 +105,11 @@ export class OpenAIAgent implements Agent {
         }, timeoutMs);
         console.log(`[OpenAIAgent] Timeout promise created, timeoutId: ${timeoutId ? 'set' : 'not set'}`);
         
-        // Also add a safety check at 2.8 seconds to confirm the timeout will trigger
+        // Also add a safety check at 1.2 seconds to confirm the timeout will trigger
         setTimeout(() => {
           const elapsed = Date.now() - startTime;
-          console.log(`[OpenAIAgent] Safety check at 2.8s - elapsed: ${elapsed}ms, timeout will trigger in ~${timeoutMs - elapsed}ms`);
-        }, 2800);
+          console.log(`[OpenAIAgent] Safety check at 1.2s - elapsed: ${elapsed}ms, timeout will trigger in ~${timeoutMs - elapsed}ms`);
+        }, 1200);
       });
       
       console.log(`[OpenAIAgent] API call promise created, awaiting response with Promise.race...`);
