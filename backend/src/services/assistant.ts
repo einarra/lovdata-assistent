@@ -189,8 +189,7 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
       const primaryHits = Array.isArray(result.hits) ? result.hits.length : 0;
 
       // Always run Serper when available to include both Lovdata and web results
-      // TEMPORARILY DISABLED FOR TESTING - Serper is causing timeouts
-      const ENABLE_SERPER = false; // Set to true to re-enable Serper
+      const ENABLE_SERPER = true; // Re-enabled - Serper skill is now working
       if (ENABLE_SERPER && services.serper) {
         logger.info({ question, hasSerper: !!services.serper }, 'runAssistant: starting Serper skill execution');
         try {

@@ -283,7 +283,9 @@ export class SupabaseArchiveStore {
     }
 
     // Build Postgres tsquery from tokens
-    // Join tokens with & (AND) and add :* for prefix matching
+    // Use prefix matching (:* ) for better recall on legal terms
+    // Example: "lov:*" matches "lovdata", "lovgivning", etc.
+    // Join with & (AND) for all terms must match
     const tsQuery = tokens.map(token => `${token}:*`).join(' & ');
 
     // Single optimized query with count
@@ -311,64 +313,118 @@ export class SupabaseArchiveStore {
           offset
         }, 'searchAsync: building query chain');
         
-        console.log(`[SupabaseArchiveStore] Building query builder...`);
-        const queryBuilder = this.supabase
-          .from('lovdata_documents')
-          .select('archive_filename, member, title, document_date, content', { count: 'exact' })
-          .textSearch('tsv_content', tsQuery, {
-            type: 'plain',
-            config: 'norwegian'
-          })
-          .order('id', { ascending: true })
-          .range(offset, offset + limit - 1);
+        console.log(`[SupabaseArchiveStore] Building RPC call for ts_rank ordered search...`);
+        // Use RPC function for relevance-ordered search with ts_rank
+        // This provides better results ordered by relevance instead of arbitrary id
+        // The RPC function should be: search_lovdata_documents(search_query, result_limit, result_offset)
+        const rpcFunctionName = 'search_lovdata_documents';
         
-        console.log(`[SupabaseArchiveStore] Query builder created, preparing to execute`);
-        this.logs.info('searchAsync: query chain built, awaiting result');
+        // Build the search query for the RPC function
+        // The RPC function expects a tsquery string, so we pass the constructed tsQuery
+        const rpcParams = {
+          search_query: tsQuery,
+          result_limit: limit,
+          result_offset: offset
+        };
+        
+        this.logs.info({ 
+          rpcFunction: rpcFunctionName,
+          rpcParams,
+          tsQuery
+        }, 'searchAsync: calling RPC function for relevance-ordered search');
         
         // Add an additional timeout wrapper around the query itself
         // This ensures we catch hanging queries even if the outer Promise.race doesn't work
         // Use 3 seconds - very aggressive to trigger before Vercel kills the function
-        // (Vercel seems to kill functions around 4-5 seconds, so 3s ensures we catch it)
         const queryTimeoutMs = 3000; // 3 seconds for the query itself - very aggressive timeout
         let queryTimeoutHandle: NodeJS.Timeout | null = null;
         
-        // Also add a safety check at 4 seconds to ensure we're still running
-      setTimeout(() => {
-        const elapsed = Date.now() - queryStartTime;
-        console.log(`[SupabaseArchiveStore] 2 second safety check - elapsed: ${elapsed}ms (timeout should trigger at ${queryTimeoutMs}ms)`);
-        this.logs.info({ elapsedMs: elapsed, queryTimeoutMs }, 'searchAsync: 2 second safety check - still running, timeout pending');
-      }, 2000);
-      
-      setTimeout(() => {
-        const elapsed = Date.now() - queryStartTime;
-        console.log(`[SupabaseArchiveStore] 2.8 second safety check - elapsed: ${elapsed}ms (timeout will trigger in ~200ms at ${queryTimeoutMs}ms)`);
-        this.logs.info({ elapsedMs: elapsed, queryTimeoutMs }, 'searchAsync: 2.8 second safety check - timeout about to trigger');
-      }, 2800);
-      
+        // Add safety checks to ensure we're still running
+        setTimeout(() => {
+          const elapsed = Date.now() - queryStartTime;
+          console.log(`[SupabaseArchiveStore] 2 second safety check - elapsed: ${elapsed}ms (timeout should trigger at ${queryTimeoutMs}ms)`);
+          this.logs.info({ elapsedMs: elapsed, queryTimeoutMs }, 'searchAsync: 2 second safety check - still running, timeout pending');
+        }, 2000);
+        
+        setTimeout(() => {
+          const elapsed = Date.now() - queryStartTime;
+          console.log(`[SupabaseArchiveStore] 2.8 second safety check - elapsed: ${elapsed}ms (timeout will trigger in ~200ms at ${queryTimeoutMs}ms)`);
+          this.logs.info({ elapsedMs: elapsed, queryTimeoutMs }, 'searchAsync: 2.8 second safety check - timeout about to trigger');
+        }, 2800);
         
         try {
-          this.logs.info({ queryTimeoutMs, queryStartTime }, 'searchAsync: awaiting query with internal timeout');
+          this.logs.info({ queryTimeoutMs, queryStartTime }, 'searchAsync: awaiting RPC query with internal timeout');
           
           // Log right before Promise.race to ensure we get there
           const raceStartTime = Date.now();
           this.logs.info({ raceStartTime }, 'searchAsync: starting internal Promise.race');
           
-          // Log right before we execute the query
-          console.log(`[SupabaseArchiveStore] About to execute query builder...`);
-          this.logs.info('searchAsync: executing query builder');
+          // Log right before we execute the RPC call
+          console.log(`[SupabaseArchiveStore] About to execute RPC call...`);
+          this.logs.info('searchAsync: executing RPC function');
           
-          // Execute the query builder directly - Supabase queries are lazy and only execute when awaited
+          // Execute the RPC call and count query in parallel with timeout protection
           const queryExecutionPromise = (async () => {
             try {
-              const result = await queryBuilder;
+              // Call the RPC function for results
+              const rpcCallPromise = this.supabase.rpc(rpcFunctionName, rpcParams);
+              
+              // Also get the total count separately (RPC function may not return count)
+              // We'll use a simple count query with the same search criteria
+              const countQueryBuilder = this.supabase
+                .from('lovdata_documents')
+                .select('*', { count: 'exact', head: true })
+                .textSearch('tsv_content', tsQuery, {
+                  type: 'plain',
+                  config: 'norwegian'
+                });
+              
+              // Execute both queries in parallel
+              const [rpcResult, countResult] = await Promise.all([
+                rpcCallPromise,
+                countQueryBuilder
+              ]);
+              
+              // Handle RPC result
+              if (rpcResult.error) {
+                this.logs.error({ err: rpcResult.error, rpcFunction: rpcFunctionName }, 'searchAsync: RPC function failed');
+                throw rpcResult.error;
+              }
+              
+              // Handle count result
+              const total = countResult.count ?? 0;
+              
+              // Map RPC result to expected format
+              // RPC function returns: { archive_filename, member, title, document_date, content, rank }
+              const data = (rpcResult.data || []).map((row: any) => ({
+                archive_filename: row.archive_filename,
+                member: row.member,
+                title: row.title,
+                document_date: row.document_date,
+                content: row.content
+              }));
+              
+              // Return result in the same format as the original query
+              const result = {
+                data,
+                error: null,
+                count: total
+              };
+              
               const raceDuration = Date.now() - raceStartTime;
-              console.log(`[SupabaseArchiveStore] Query builder completed after ${raceDuration}ms`);
-              this.logs.info({ raceDurationMs: raceDuration, resolvedBy: 'query' }, 'searchAsync: internal Promise.race resolved - query won');
+              console.log(`[SupabaseArchiveStore] RPC query completed after ${raceDuration}ms`);
+              this.logs.info({ 
+                raceDurationMs: raceDuration, 
+                resolvedBy: 'query',
+                resultCount: data.length,
+                total
+              }, 'searchAsync: internal Promise.race resolved - query won');
+              
               return result;
             } catch (err: unknown) {
               const raceDuration = Date.now() - raceStartTime;
-              console.log(`[SupabaseArchiveStore] Query builder failed after ${raceDuration}ms:`, err instanceof Error ? err.message : String(err));
-              this.logs.error({ err, raceDurationMs: raceDuration }, 'searchAsync: query builder failed');
+              console.log(`[SupabaseArchiveStore] RPC query failed after ${raceDuration}ms:`, err instanceof Error ? err.message : String(err));
+              this.logs.error({ err, raceDurationMs: raceDuration }, 'searchAsync: RPC query failed');
               throw err;
             }
           })();
@@ -430,7 +486,7 @@ export class SupabaseArchiveStore {
           }
           
           const queryDuration = Date.now() - queryStartTime;
-          this.logs.info({ queryDurationMs: queryDuration }, 'searchAsync: Supabase query promise resolved');
+          this.logs.info({ queryDurationMs: queryDuration }, 'searchAsync: RPC query promise resolved');
           
           if (queryAborted) {
             this.logs.warn('searchAsync: query completed but was already aborted');
