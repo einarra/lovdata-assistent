@@ -62,11 +62,6 @@ export class OpenAIAgent implements Agent {
     
     // No specific checks needed (timeout is 1.5s, very short)
     const specificChecks: NodeJS.Timeout[] = [];
-      return setTimeout(() => {
-        const elapsed = Date.now() - startTime;
-        console.log(`[OpenAIAgent] ${seconds} second check - elapsed: ${elapsed}ms`);
-      }, seconds * 1000);
-    });
 
     let response;
     try {
