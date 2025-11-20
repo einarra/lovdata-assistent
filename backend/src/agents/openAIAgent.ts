@@ -46,8 +46,9 @@ export class OpenAIAgent implements Agent {
       model: this.model
     }, 'OpenAIAgent.generate: starting API call');
 
-    // Add timeout to prevent hanging (8 seconds max - we've already used ~3.5s, so keep it short)
-    const timeoutMs = 8000;
+    // Add timeout to prevent hanging (5 seconds max - we've already used ~3.5s, so keep it very short)
+    // This ensures we have time to return a response before Vercel kills the function
+    const timeoutMs = 5000;
     const startTime = Date.now();
     const controller = new AbortController();
 
@@ -58,8 +59,8 @@ export class OpenAIAgent implements Agent {
       console.log(`[OpenAIAgent] Still waiting for OpenAI response... elapsed: ${elapsed}ms, timeout at: ${timeoutMs}ms`);
     }, 1000); // Check every 1 second
     
-    // Also add specific checks at 1, 2, 3, 4, 5, 6, 7 seconds
-    const specificChecks = [1, 2, 3, 4, 5, 6, 7].map(seconds => {
+    // Also add specific checks at 1, 2, 3, 4 seconds (timeout is 5s)
+    const specificChecks = [1, 2, 3, 4].map(seconds => {
       return setTimeout(() => {
         const elapsed = Date.now() - startTime;
         console.log(`[OpenAIAgent] ${seconds} second check - elapsed: ${elapsed}ms`);
@@ -89,20 +90,41 @@ export class OpenAIAgent implements Agent {
       );
       
       // Create a timeout promise that will reject if the API call takes too long
+      // Use a separate timeout ID so we can log when it's set up
+      let timeoutId: NodeJS.Timeout;
       const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => {
+        console.log(`[OpenAIAgent] Creating timeout promise, will trigger in ${timeoutMs}ms`);
+        timeoutId = setTimeout(() => {
           const elapsed = Date.now() - startTime;
+          console.log(`[OpenAIAgent] TIMEOUT PROMISE TRIGGERED after ${elapsed}ms`);
           console.log(`[OpenAIAgent] Timeout promise triggered after ${elapsed}ms`);
           logger.error({ elapsedMs: elapsed, timeoutMs }, 'OpenAIAgent.generate: timeout triggered');
           controller.abort();
           reject(new Error(`OpenAI API call timed out after ${timeoutMs}ms`));
         }, timeoutMs);
+        console.log(`[OpenAIAgent] Timeout promise created, timeoutId: ${timeoutId ? 'set' : 'not set'}`);
       });
       
       console.log(`[OpenAIAgent] API call promise created, awaiting response with Promise.race...`);
+      console.log(`[OpenAIAgent] About to await Promise.race([apiCallPromise, timeoutPromise])`);
       
       // Use Promise.race to ensure timeout always triggers
-      response = await Promise.race([apiCallPromise, timeoutPromise]);
+      // Add a wrapper to log which promise resolves first
+      const racePromise = Promise.race([
+        apiCallPromise.then(result => {
+          const elapsed = Date.now() - startTime;
+          console.log(`[OpenAIAgent] API call promise resolved first after ${elapsed}ms`);
+          return result;
+        }),
+        timeoutPromise.catch(error => {
+          const elapsed = Date.now() - startTime;
+          console.log(`[OpenAIAgent] Timeout promise rejected first after ${elapsed}ms`);
+          throw error;
+        })
+      ]);
+      
+      console.log(`[OpenAIAgent] Promise.race created, awaiting result...`);
+      response = await racePromise;
       
       // Clear all timeouts and intervals
       clearInterval(progressCheckInterval);
