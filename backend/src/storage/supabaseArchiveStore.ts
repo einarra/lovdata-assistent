@@ -372,11 +372,11 @@ export class SupabaseArchiveStore {
               // Also get the total count separately (RPC function may not return count)
               // We'll use a simple count query with the same search criteria
               const countQueryBuilder = this.supabase
-                .from('lovdata_documents')
+      .from('lovdata_documents')
                 .select('*', { count: 'exact', head: true })
-                .textSearch('tsv_content', tsQuery, {
-                  type: 'plain',
-                  config: 'norwegian'
+      .textSearch('tsv_content', tsQuery, {
+        type: 'plain',
+        config: 'norwegian'
                 });
               
               // Execute both queries in parallel
@@ -738,13 +738,13 @@ export class SupabaseArchiveStore {
       try {
         this.logs.info({ filename, member }, 'getDocumentContentAsync: executing Supabase query');
         const queryStartTime = Date.now();
-        
-        const { data, error } = await this.supabase
-          .from('lovdata_documents')
-          .select('content')
-          .eq('archive_filename', filename)
-          .eq('member', member)
-          .maybeSingle();
+
+    const { data, error } = await this.supabase
+      .from('lovdata_documents')
+      .select('content')
+      .eq('archive_filename', filename)
+      .eq('member', member)
+      .maybeSingle();
 
         const fetchDuration = Date.now() - fetchStartTime;
         this.logs.info({ 
@@ -754,20 +754,20 @@ export class SupabaseArchiveStore {
           contentLength: data?.content?.length ?? 0
         }, 'getDocumentContentAsync: query completed');
 
-        if (error) {
-          fetchTimer.end({ success: false, found: false, error: error.message });
-          this.logs.error({ err: error, filename, member }, 'Failed to fetch document content');
-          return null;
-        }
+    if (error) {
+      fetchTimer.end({ success: false, found: false, error: error.message });
+      this.logs.error({ err: error, filename, member }, 'Failed to fetch document content');
+      return null;
+    }
 
-        if (!data) {
-          fetchTimer.end({ success: true, found: false });
-          return null;
-        }
+    if (!data) {
+      fetchTimer.end({ success: true, found: false });
+      return null;
+    }
 
-        const contentLength = data.content?.length ?? 0;
-        fetchTimer.end({ success: true, found: true, contentLength });
-        return data.content;
+    const contentLength = data.content?.length ?? 0;
+    fetchTimer.end({ success: true, found: true, contentLength });
+    return data.content;
       } catch (queryError) {
         const fetchDuration = Date.now() - fetchStartTime;
         this.logs.error({ err: queryError, fetchDurationMs: fetchDuration }, 'getDocumentContentAsync: query error');
@@ -803,6 +803,7 @@ export class SupabaseArchiveStore {
     this.validateFilename(filename);
     this.validateMember(member);
 
+    try {
     const { data, error } = await this.supabase
       .from('lovdata_documents')
       .select('content, title, document_date, relative_path')
@@ -811,11 +812,21 @@ export class SupabaseArchiveStore {
       .maybeSingle();
 
     if (error) {
-      this.logs.error({ err: error, filename, member }, 'Failed to fetch document');
+        // Log Supabase errors with more detail
+        this.logs.error({ 
+          err: error, 
+          filename, 
+          member,
+          errorCode: (error as any)?.code,
+          errorMessage: (error as any)?.message,
+          errorDetails: (error as any)?.details,
+          errorHint: (error as any)?.hint
+        }, 'Failed to fetch document from Supabase');
       return null;
     }
 
     if (!data) {
+        this.logs.debug({ filename, member }, 'Document not found in Supabase');
       return null;
     }
 
@@ -825,6 +836,16 @@ export class SupabaseArchiveStore {
       date: data.document_date,
       relativePath: data.relative_path
     };
+    } catch (queryError) {
+      // Handle unexpected errors
+      this.logs.error({ 
+        err: queryError, 
+        filename, 
+        member,
+        errorType: queryError instanceof Error ? queryError.constructor.name : typeof queryError
+      }, 'Unexpected error in getDocumentAsync');
+      return null;
+    }
   }
 
   async prepareDocumentFile(

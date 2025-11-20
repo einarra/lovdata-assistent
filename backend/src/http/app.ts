@@ -392,20 +392,36 @@ export function createApp() {
           }
 
           if (archiveStore) {
-            const recordTimer = new Timer('get_document_record', logger, { filename, member: actualMember });
-            const record = await archiveStore.getDocumentAsync(filename, actualMember);
-            recordTimer.end({ found: !!record });
-            
-            if (record) {
-              const textTimer = new Timer('read_document_text', logger, { filename, member: actualMember });
-              text = await archiveStore.readDocumentText(filename, actualMember);
-              textTimer.end({ textLength: text?.length ?? 0 });
-              title = record.title;
-              date = record.date;
+            try {
+              const recordTimer = new Timer('get_document_record', logger, { filename, member: actualMember });
+              const record = await archiveStore.getDocumentAsync(filename, actualMember);
+              recordTimer.end({ found: !!record });
+              
+              if (record) {
+                const textTimer = new Timer('read_document_text', logger, { filename, member: actualMember });
+                text = await archiveStore.readDocumentText(filename, actualMember);
+                textTimer.end({ textLength: text?.length ?? 0 });
+                title = record.title;
+                date = record.date;
+              } else {
+                logger.info({ filename, member: actualMember }, 'Document not found in archive store, will try remote');
+              }
+            } catch (archiveError) {
+              // Log but don't fail - try remote as fallback
+              logger.warn({ 
+                err: archiveError, 
+                filename, 
+                member: actualMember 
+              }, 'Error fetching from archive store, will try remote');
             }
           }
 
           if (!text) {
+            if (!services.lovdata) {
+              logger.error({ filename, member: actualMember }, 'No archive store or lovdata client available');
+              throw new Error('Document not found and no remote source available');
+            }
+            
             try {
               const remoteTimer = new Timer('fetch_remote_xml', logger, { filename, member: actualMember });
               const remote = await services.lovdata.extractXml(filename, actualMember);
@@ -413,8 +429,14 @@ export function createApp() {
               text = remote.text;
               title = remote.title ?? null;
               date = remote.date ?? null;
-            } catch (error) {
-              throw error;
+            } catch (remoteError) {
+              logger.error({ 
+                err: remoteError, 
+                filename, 
+                member: actualMember 
+              }, 'Failed to fetch document from remote source');
+              // Re-throw with a more user-friendly message
+              throw new Error(`Document not found: ${filename}/${actualMember}`);
             }
           }
 
@@ -476,6 +498,27 @@ export function createApp() {
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
       res.send(text);
     } catch (error) {
+      // Handle document not found errors with 404
+      if (error instanceof Error && (
+        error.message.includes('not found') || 
+        error.message.includes('NOT_FOUND') ||
+        error.message.includes('Document not found')
+      )) {
+        logger.warn({ 
+          err: error, 
+          query: req.query 
+        }, 'Document not found');
+        if (!res.headersSent) {
+          res.status(404).json({ 
+            error: 'NOT_FOUND',
+            message: error.message,
+            code: 'NOT_FOUND'
+          });
+        }
+        return;
+      }
+      
+      // For other errors, pass to Express error handler
       next(error);
     }
   });
