@@ -46,8 +46,8 @@ export class OpenAIAgent implements Agent {
       model: this.model
     }, 'OpenAIAgent.generate: starting API call');
 
-    // Add timeout to prevent hanging (15 seconds max - keep it well under Vercel's limit)
-    const timeoutMs = 15000;
+    // Add timeout to prevent hanging (8 seconds max - we've already used ~3.5s, so keep it short)
+    const timeoutMs = 8000;
     const startTime = Date.now();
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
@@ -57,11 +57,36 @@ export class OpenAIAgent implements Agent {
       controller.abort();
     }, timeoutMs);
 
+    // Add progress checks while waiting for OpenAI API
+    console.log(`[OpenAIAgent] Setting up progress checks...`);
+    const progressCheckInterval = setInterval(() => {
+      const elapsed = Date.now() - startTime;
+      console.log(`[OpenAIAgent] Still waiting for OpenAI response... elapsed: ${elapsed}ms, timeout at: ${timeoutMs}ms`);
+    }, 1000); // Check every 1 second
+    
+    // Also add specific checks at 1, 2, 3 seconds
+    setTimeout(() => {
+      const elapsed = Date.now() - startTime;
+      console.log(`[OpenAIAgent] 1 second check - elapsed: ${elapsed}ms`);
+    }, 1000);
+    
+    setTimeout(() => {
+      const elapsed = Date.now() - startTime;
+      console.log(`[OpenAIAgent] 2 second check - elapsed: ${elapsed}ms`);
+    }, 2000);
+    
+    setTimeout(() => {
+      const elapsed = Date.now() - startTime;
+      console.log(`[OpenAIAgent] 3 second check - elapsed: ${elapsed}ms`);
+    }, 3000);
+
     let response;
     try {
       console.log(`[OpenAIAgent] Starting API call, timeout: ${timeoutMs}ms`);
       logger.info({ timeoutMs }, 'OpenAIAgent.generate: calling OpenAI API');
-      response = await this.client.chat.completions.create(
+      console.log(`[OpenAIAgent] About to call OpenAI API with AbortController signal`);
+      
+      const apiCallPromise = this.client.chat.completions.create(
         {
           model: this.model,
           temperature: this.temperature,
@@ -74,7 +99,15 @@ export class OpenAIAgent implements Agent {
         {
           signal: controller.signal
         }
-      );
+      ).finally(() => {
+        // Clear progress checks when API call completes
+        clearInterval(progressCheckInterval);
+        console.log(`[OpenAIAgent] Progress checks cleared`);
+      });
+      
+      console.log(`[OpenAIAgent] API call promise created, awaiting response...`);
+      response = await apiCallPromise;
+      
       clearTimeout(timeoutId);
       const elapsed = Date.now() - startTime;
       console.log(`[OpenAIAgent] API call completed after ${elapsed}ms`);
@@ -85,7 +118,9 @@ export class OpenAIAgent implements Agent {
       }, 'OpenAIAgent.generate: OpenAI API call completed');
     } catch (error) {
       clearTimeout(timeoutId);
+      clearInterval(progressCheckInterval);
       const elapsed = Date.now() - startTime;
+      console.log(`[OpenAIAgent] Catch block entered after ${elapsed}ms`);
       console.log(`[OpenAIAgent] API call failed after ${elapsed}ms:`, error instanceof Error ? error.message : String(error));
       
       if (error instanceof Error && error.name === 'AbortError') {
