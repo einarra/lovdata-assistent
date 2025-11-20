@@ -327,23 +327,23 @@ export class SupabaseArchiveStore {
         
         // Add an additional timeout wrapper around the query itself
         // This ensures we catch hanging queries even if the outer Promise.race doesn't work
-        // Use 5 seconds to balance query completion time with Vercel limits
-        // (Vercel Hobby tier has 10s limit, so 5s gives us buffer for Serper)
-        const queryTimeoutMs = 5000; // 5 seconds for the query itself - balance between completion and timeout
+        // Use 3 seconds - very aggressive to trigger before Vercel kills the function
+        // (Vercel seems to kill functions around 4-5 seconds, so 3s ensures we catch it)
+        const queryTimeoutMs = 3000; // 3 seconds for the query itself - very aggressive timeout
         let queryTimeoutHandle: NodeJS.Timeout | null = null;
         
         // Also add a safety check at 4 seconds to ensure we're still running
       setTimeout(() => {
         const elapsed = Date.now() - queryStartTime;
-        console.log(`[SupabaseArchiveStore] 4 second safety check - elapsed: ${elapsed}ms (timeout should trigger at ${queryTimeoutMs}ms)`);
-        this.logs.info({ elapsedMs: elapsed, queryTimeoutMs }, 'searchAsync: 4 second safety check - still running, timeout pending');
-      }, 4000);
+        console.log(`[SupabaseArchiveStore] 2 second safety check - elapsed: ${elapsed}ms (timeout should trigger at ${queryTimeoutMs}ms)`);
+        this.logs.info({ elapsedMs: elapsed, queryTimeoutMs }, 'searchAsync: 2 second safety check - still running, timeout pending');
+      }, 2000);
       
       setTimeout(() => {
         const elapsed = Date.now() - queryStartTime;
-        console.log(`[SupabaseArchiveStore] 5 second safety check - elapsed: ${elapsed}ms (timeout should trigger at ${queryTimeoutMs}ms)`);
-        this.logs.info({ elapsedMs: elapsed, queryTimeoutMs }, 'searchAsync: 5 second safety check - still running, timeout pending');
-      }, 5000);
+        console.log(`[SupabaseArchiveStore] 2.8 second safety check - elapsed: ${elapsed}ms (timeout will trigger in ~200ms at ${queryTimeoutMs}ms)`);
+        this.logs.info({ elapsedMs: elapsed, queryTimeoutMs }, 'searchAsync: 2.8 second safety check - timeout about to trigger');
+      }, 2800);
       
         
         try {
@@ -379,9 +379,9 @@ export class SupabaseArchiveStore {
           // Log right before timeout to confirm it's about to trigger
           setTimeout(() => {
             const elapsed = Date.now() - queryStartTime;
-            console.log(`[SupabaseArchiveStore] 4.9 second check - elapsed: ${elapsed}ms (timeout will trigger in ~100ms at ${queryTimeoutMs}ms)`);
-            this.logs.info({ elapsedMs: elapsed, queryTimeoutMs }, 'searchAsync: 4.9 second check - timeout about to trigger');
-          }, 4900);
+            console.log(`[SupabaseArchiveStore] 2.9 second check - elapsed: ${elapsed}ms (timeout will trigger in ~100ms at ${queryTimeoutMs}ms)`);
+            this.logs.info({ elapsedMs: elapsed, queryTimeoutMs }, 'searchAsync: 2.9 second check - timeout about to trigger');
+          }, 2900);
           
           // Create a timeout promise that resolves (not rejects) to make Promise.race work properly
           const timeoutWrapperPromise = new Promise<{ type: 'timeout'; error: Error }>((resolve) => {
@@ -571,6 +571,8 @@ export class SupabaseArchiveStore {
       }, 'searchAsync: Promise.race rejected (timeout or error)');
       queryTimer.end({ success: false, error: timeoutError instanceof Error ? timeoutError.message : String(timeoutError) });
       searchTimer.end({ success: false, error: 'timeout' });
+      console.log(`[SupabaseArchiveStore] Returning empty results due to timeout/error`);
+      this.logs.info('searchAsync: returning empty results due to timeout');
       return { hits: [], total: 0 };
     }
     
