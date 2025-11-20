@@ -40,6 +40,15 @@ export class OpenAIAgent implements Agent {
   async generate(input: AgentInput): Promise<AgentOutput> {
     const prompt = buildUserPrompt(input.question, input.evidence);
     
+    // Validate model name - "gpt-5" is not a valid OpenAI model and may cause hangs
+    const knownValidModels = ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo'];
+    if (!knownValidModels.includes(this.model)) {
+      logger.warn({ 
+        model: this.model,
+        knownValidModels 
+      }, 'OpenAIAgent.generate: model name not in known valid list - this may cause the API to hang or fail. Common valid models: gpt-4o-mini, gpt-4o, gpt-4-turbo');
+    }
+    
     logger.info({ 
       question: input.question,
       evidenceCount: input.evidence.length,

@@ -364,7 +364,17 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
             sampleCount: traceEvidenceSample.length
           }, 'runAssistant: calling OpenAI agent');
           
-          const agentCall = await withTrace<AgentOutput>(
+          // Check if we've already used too much time - if so, skip OpenAI and use fallback
+          const timeUsedSoFar = performance.now() - started;
+          const maxTimeForOpenAI = 7000; // 7 seconds max for the entire request (leave 3s for response)
+          if (timeUsedSoFar > maxTimeForOpenAI) {
+            logger.warn({ 
+              timeUsedSoFar: Math.round(timeUsedSoFar),
+              maxTimeForOpenAI 
+            }, 'runAssistant: skipping OpenAI call - too much time already used, using fallback');
+            // Skip OpenAI call and use fallback (agentOutput will remain undefined)
+          } else {
+            const agentCall = await withTrace<AgentOutput>(
             {
               name: 'agent.answer',
               runType: 'llm',
@@ -387,13 +397,10 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
             }
           );
 
-          agentOutput = agentCall.result;
-          usedAgent = true;
-          logger.info('runAssistant: agent output obtained');
-
-          agentOutput = agentCall.result;
-          usedAgent = true;
-          logger.info('runAssistant: agent output obtained');
+            agentOutput = agentCall.result;
+            usedAgent = true;
+            logger.info('runAssistant: agent output obtained');
+          }
         } catch (error) {
           logger.error({ err: error }, 'OpenAI agent failed; falling back to heuristic summary');
         }
