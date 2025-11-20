@@ -50,12 +50,6 @@ export class OpenAIAgent implements Agent {
     const timeoutMs = 8000;
     const startTime = Date.now();
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => {
-      const elapsed = Date.now() - startTime;
-      console.log(`[OpenAIAgent] Timeout triggered after ${elapsed}ms`);
-      logger.error({ elapsedMs: elapsed, timeoutMs }, 'OpenAIAgent.generate: timeout triggered');
-      controller.abort();
-    }, timeoutMs);
 
     // Add progress checks while waiting for OpenAI API
     console.log(`[OpenAIAgent] Setting up progress checks...`);
@@ -64,21 +58,13 @@ export class OpenAIAgent implements Agent {
       console.log(`[OpenAIAgent] Still waiting for OpenAI response... elapsed: ${elapsed}ms, timeout at: ${timeoutMs}ms`);
     }, 1000); // Check every 1 second
     
-    // Also add specific checks at 1, 2, 3 seconds
-    setTimeout(() => {
-      const elapsed = Date.now() - startTime;
-      console.log(`[OpenAIAgent] 1 second check - elapsed: ${elapsed}ms`);
-    }, 1000);
-    
-    setTimeout(() => {
-      const elapsed = Date.now() - startTime;
-      console.log(`[OpenAIAgent] 2 second check - elapsed: ${elapsed}ms`);
-    }, 2000);
-    
-    setTimeout(() => {
-      const elapsed = Date.now() - startTime;
-      console.log(`[OpenAIAgent] 3 second check - elapsed: ${elapsed}ms`);
-    }, 3000);
+    // Also add specific checks at 1, 2, 3, 4, 5, 6, 7 seconds
+    const specificChecks = [1, 2, 3, 4, 5, 6, 7].map(seconds => {
+      return setTimeout(() => {
+        const elapsed = Date.now() - startTime;
+        console.log(`[OpenAIAgent] ${seconds} second check - elapsed: ${elapsed}ms`);
+      }, seconds * 1000);
+    });
 
     let response;
     try {
@@ -86,6 +72,7 @@ export class OpenAIAgent implements Agent {
       logger.info({ timeoutMs }, 'OpenAIAgent.generate: calling OpenAI API');
       console.log(`[OpenAIAgent] About to call OpenAI API with AbortController signal`);
       
+      // Create the API call promise
       const apiCallPromise = this.client.chat.completions.create(
         {
           model: this.model,
@@ -99,16 +86,29 @@ export class OpenAIAgent implements Agent {
         {
           signal: controller.signal
         }
-      ).finally(() => {
-        // Clear progress checks when API call completes
-        clearInterval(progressCheckInterval);
-        console.log(`[OpenAIAgent] Progress checks cleared`);
+      );
+      
+      // Create a timeout promise that will reject if the API call takes too long
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => {
+          const elapsed = Date.now() - startTime;
+          console.log(`[OpenAIAgent] Timeout promise triggered after ${elapsed}ms`);
+          logger.error({ elapsedMs: elapsed, timeoutMs }, 'OpenAIAgent.generate: timeout triggered');
+          controller.abort();
+          reject(new Error(`OpenAI API call timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
       });
       
-      console.log(`[OpenAIAgent] API call promise created, awaiting response...`);
-      response = await apiCallPromise;
+      console.log(`[OpenAIAgent] API call promise created, awaiting response with Promise.race...`);
       
-      clearTimeout(timeoutId);
+      // Use Promise.race to ensure timeout always triggers
+      response = await Promise.race([apiCallPromise, timeoutPromise]);
+      
+      // Clear all timeouts and intervals
+      clearInterval(progressCheckInterval);
+      specificChecks.forEach(clearTimeout);
+      console.log(`[OpenAIAgent] Progress checks cleared`);
+      
       const elapsed = Date.now() - startTime;
       console.log(`[OpenAIAgent] API call completed after ${elapsed}ms`);
       logger.info({ 
@@ -117,13 +117,14 @@ export class OpenAIAgent implements Agent {
         elapsedMs: elapsed
       }, 'OpenAIAgent.generate: OpenAI API call completed');
     } catch (error) {
-      clearTimeout(timeoutId);
+      // Clear all timeouts and intervals
       clearInterval(progressCheckInterval);
+      specificChecks.forEach(clearTimeout);
       const elapsed = Date.now() - startTime;
       console.log(`[OpenAIAgent] Catch block entered after ${elapsed}ms`);
       console.log(`[OpenAIAgent] API call failed after ${elapsed}ms:`, error instanceof Error ? error.message : String(error));
       
-      if (error instanceof Error && error.name === 'AbortError') {
+      if (error instanceof Error && (error.name === 'AbortError' || error.message.includes('timed out'))) {
         logger.error({ timeoutMs, elapsedMs: elapsed }, 'OpenAIAgent.generate: API call timed out');
         throw new Error(`OpenAI API call timed out after ${timeoutMs}ms`);
       }
