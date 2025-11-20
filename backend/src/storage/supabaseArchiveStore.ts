@@ -333,11 +333,23 @@ export class SupabaseArchiveStore {
         let queryTimeoutHandle: NodeJS.Timeout | null = null;
         
         // Also add a safety check at 4 seconds to ensure we're still running
-        setTimeout(() => {
-          const elapsed = Date.now() - queryStartTime;
-          console.log(`[SupabaseArchiveStore] 4 second safety check - elapsed: ${elapsed}ms (timeout should trigger at ${queryTimeoutMs}ms)`);
-          this.logs.info({ elapsedMs: elapsed, queryTimeoutMs }, 'searchAsync: 4 second safety check - still running, timeout pending');
-        }, 4000);
+      setTimeout(() => {
+        const elapsed = Date.now() - queryStartTime;
+        console.log(`[SupabaseArchiveStore] 4 second safety check - elapsed: ${elapsed}ms (timeout should trigger at ${queryTimeoutMs}ms)`);
+        this.logs.info({ elapsedMs: elapsed, queryTimeoutMs }, 'searchAsync: 4 second safety check - still running, timeout pending');
+      }, 4000);
+      
+      setTimeout(() => {
+        const elapsed = Date.now() - queryStartTime;
+        console.log(`[SupabaseArchiveStore] 5 second safety check - elapsed: ${elapsed}ms (timeout should trigger at ${queryTimeoutMs}ms)`);
+        this.logs.info({ elapsedMs: elapsed, queryTimeoutMs }, 'searchAsync: 5 second safety check - still running, timeout pending');
+      }, 5000);
+      
+      setTimeout(() => {
+        const elapsed = Date.now() - queryStartTime;
+        console.log(`[SupabaseArchiveStore] 5.5 second safety check - elapsed: ${elapsed}ms (timeout should trigger at ${queryTimeoutMs}ms)`);
+        this.logs.info({ elapsedMs: elapsed, queryTimeoutMs }, 'searchAsync: 5.5 second safety check - still running, timeout pending');
+      }, 5500);
         
         try {
           this.logs.info({ queryTimeoutMs, queryStartTime }, 'searchAsync: awaiting query with internal timeout');
