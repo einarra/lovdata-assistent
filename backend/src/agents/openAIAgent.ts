@@ -87,10 +87,10 @@ export class OpenAIAgent implements Agent {
       
       // Create a timeout promise that will reject if the API call takes too long
       // Use a separate timeout ID so we can log when it's set up
-      // Also create a separate timeout that will definitely trigger to ensure we don't hang
-      let timeoutId: NodeJS.Timeout;
+      // Create the timeout OUTSIDE the Promise constructor to ensure it's set immediately
+      console.log(`[OpenAIAgent] Creating timeout promise, will trigger in ${timeoutMs}ms`);
+      let timeoutId: NodeJS.Timeout | null = null;
       const timeoutPromise = new Promise<never>((_, reject) => {
-        console.log(`[OpenAIAgent] Creating timeout promise, will trigger in ${timeoutMs}ms`);
         timeoutId = setTimeout(() => {
           const elapsed = Date.now() - startTime;
           console.log(`[OpenAIAgent] ========== TIMEOUT PROMISE TRIGGERED after ${elapsed}ms ==========`);
@@ -99,13 +99,14 @@ export class OpenAIAgent implements Agent {
           reject(new Error(`OpenAI API call timed out after ${timeoutMs}ms`));
         }, timeoutMs);
         console.log(`[OpenAIAgent] Timeout promise created, timeoutId: ${timeoutId ? 'set' : 'not set'}`);
-        
-        // Also add a safety check at 1.2 seconds to confirm the timeout will trigger
-        setTimeout(() => {
-          const elapsed = Date.now() - startTime;
-          console.log(`[OpenAIAgent] Safety check at 1.2s - elapsed: ${elapsed}ms, timeout will trigger in ~${timeoutMs - elapsed}ms`);
-        }, 1200);
       });
+      
+      // Also add a safety check at 1.2 seconds to confirm the timeout will trigger
+      // This is OUTSIDE the Promise constructor to ensure it's set immediately
+      setTimeout(() => {
+        const elapsed = Date.now() - startTime;
+        console.log(`[OpenAIAgent] Safety check at 1.2s - elapsed: ${elapsed}ms, timeout will trigger in ~${timeoutMs - elapsed}ms`);
+      }, 1200);
       
       console.log(`[OpenAIAgent] API call promise created, awaiting response with Promise.race...`);
       console.log(`[OpenAIAgent] About to await Promise.race([apiCallPromise, timeoutPromise])`);

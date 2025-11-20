@@ -390,6 +390,10 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
           agentOutput = agentCall.result;
           usedAgent = true;
           logger.info('runAssistant: agent output obtained');
+
+          agentOutput = agentCall.result;
+          usedAgent = true;
+          logger.info('runAssistant: agent output obtained');
         } catch (error) {
           logger.error({ err: error }, 'OpenAI agent failed; falling back to heuristic summary');
         }
