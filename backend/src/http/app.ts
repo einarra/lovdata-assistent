@@ -471,11 +471,27 @@ export function createApp() {
       const markdown = formatLovdataMarkdown(text, { title, date });
       const isHtml = isHtmlContent(text);
 
+      // HTTP headers must only contain ASCII characters
+      // Vercel will reject headers with non-ASCII characters
+      // Only set headers if they contain only ASCII characters
       if (title) {
-        res.setHeader('X-Lovdata-Title', title);
+        // Check if title contains only ASCII characters
+        const isAscii = /^[\x00-\x7F]*$/.test(title);
+        if (isAscii) {
+          res.setHeader('X-Lovdata-Title', title);
+        } else {
+          // Skip header if it contains non-ASCII characters
+          logger.debug({ title }, 'Skipping X-Lovdata-Title header - contains non-ASCII characters');
+        }
       }
       if (date) {
-        res.setHeader('X-Lovdata-Date', date);
+        // Date should be ASCII, but check anyway
+        const isAscii = /^[\x00-\x7F]*$/.test(date);
+        if (isAscii) {
+          res.setHeader('X-Lovdata-Date', date);
+        } else {
+          logger.debug({ date }, 'Skipping X-Lovdata-Date header - contains non-ASCII characters');
+        }
       }
 
       if (format === 'markdown') {
