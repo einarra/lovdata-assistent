@@ -349,7 +349,22 @@ export function createApp() {
 
   app.get('/documents/xml', async (req: Request, res: Response, next: NextFunction) => {
     try {
+      // Log incoming request for debugging
+      logger.info({ 
+        path: req.path,
+        url: req.url,
+        query: req.query,
+        method: req.method
+      }, 'GET /documents/xml: request received');
+      
       const { filename, member } = readXmlSchema.parse(req.query);
+      
+      logger.info({ 
+        filename, 
+        member,
+        decodedMember: decodeURIComponent(member)
+      }, 'GET /documents/xml: parsed query parameters');
+      
       const format =
         typeof req.query.format === 'string'
           ? (req.query.format as string).toLowerCase()
@@ -498,6 +513,37 @@ export function createApp() {
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
       res.send(text);
     } catch (error) {
+      // Log all errors for debugging
+      logger.error({ 
+        err: error,
+        errorType: error instanceof Error ? error.constructor.name : typeof error,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        query: req.query,
+        path: req.path,
+        url: req.url
+      }, 'GET /documents/xml: error occurred');
+      
+      // Handle Zod validation errors (missing/invalid query params)
+      if (error instanceof z.ZodError) {
+        logger.warn({ 
+          issues: error.issues,
+          query: req.query
+        }, 'GET /documents/xml: validation error');
+        if (!res.headersSent) {
+          res.status(400).json({ 
+            error: 'BAD_REQUEST',
+            message: 'Invalid query parameters',
+            issues: error.issues.map(issue => ({
+              path: issue.path.join('.'),
+              message: issue.message
+            })),
+            code: 'BAD_REQUEST'
+          });
+        }
+        return;
+      }
+      
       // Handle document not found errors with 404
       if (error instanceof Error && (
         error.message.includes('not found') || 
@@ -506,19 +552,27 @@ export function createApp() {
       )) {
         logger.warn({ 
           err: error, 
-          query: req.query 
-        }, 'Document not found');
+          query: req.query,
+          filename: req.query.filename,
+          member: req.query.member
+        }, 'GET /documents/xml: document not found');
         if (!res.headersSent) {
           res.status(404).json({ 
             error: 'NOT_FOUND',
             message: error.message,
-            code: 'NOT_FOUND'
+            code: 'NOT_FOUND',
+            filename: req.query.filename,
+            member: req.query.member
           });
         }
         return;
       }
       
       // For other errors, pass to Express error handler
+      logger.error({ 
+        err: error,
+        stack: error instanceof Error ? error.stack : undefined
+      }, 'GET /documents/xml: unexpected error');
       next(error);
     }
   });
