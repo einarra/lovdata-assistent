@@ -528,7 +528,9 @@ export class SupabaseArchiveStore {
       }, timeoutMs);
     });
     
-    let data, error, count;
+    let data: any[] | null | undefined;
+    let error: any | null | undefined;
+    let count: number | null | undefined;
     try {
       this.logs.info({ queryStartTime, timeoutMs }, 'searchAsync: waiting for query result with timeout');
       
@@ -642,7 +644,8 @@ export class SupabaseArchiveStore {
     }, 'searchAsync: about to check for errors');
 
     if (error) {
-      searchTimer.end({ success: false, error: error.message });
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      searchTimer.end({ success: false, error: errorMessage });
       this.logs.error({ err: error, query }, 'Failed to search documents');
       this.logs.info('searchAsync: returning empty hits due to error');
       return { hits: [], total: 0 };
