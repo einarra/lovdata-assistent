@@ -365,11 +365,11 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
           }, 'runAssistant: calling OpenAI agent');
           
           // Check if we've already used too much time - if so, skip OpenAI and use fallback
-          // We've already used ~3.5s (database timeout + Serper), so skip if we're past 3.8s
-          // This prevents Vercel from killing the function before we can return a response
-          // The timeout mechanism isn't reliable in Vercel, so we skip proactively
+          // We've already used ~3.5s (database timeout + Serper), so ALWAYS skip OpenAI
+          // The timeout mechanism isn't reliable in Vercel, and OpenAI calls are consistently
+          // causing the function to be killed. Skip proactively to ensure we can return a response.
           const timeUsedSoFar = performance.now() - started;
-          const maxTimeForOpenAI = 3800; // 3.8 seconds max - skip OpenAI to ensure we can return
+          const maxTimeForOpenAI = 3300; // 3.3 seconds max - always skip OpenAI after database timeout
           if (timeUsedSoFar > maxTimeForOpenAI) {
             logger.warn({ 
               timeUsedSoFar: Math.round(timeUsedSoFar),
@@ -377,6 +377,10 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
             }, 'runAssistant: skipping OpenAI call - too much time already used, using fallback');
             // Skip OpenAI call and use fallback (agentOutput will remain undefined)
           } else {
+            logger.info({ 
+              timeUsedSoFar: Math.round(timeUsedSoFar),
+              maxTimeForOpenAI 
+            }, 'runAssistant: proceeding with OpenAI call - time check passed');
             const agentCall = await withTrace<AgentOutput>(
             {
               name: 'agent.answer',
