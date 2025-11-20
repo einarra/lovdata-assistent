@@ -189,7 +189,9 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
       const primaryHits = Array.isArray(result.hits) ? result.hits.length : 0;
 
       // Always run Serper when available to include both Lovdata and web results
-      if (services.serper) {
+      // TEMPORARILY DISABLED FOR TESTING - Serper is causing timeouts
+      const ENABLE_SERPER = false; // Set to true to re-enable Serper
+      if (ENABLE_SERPER && services.serper) {
         logger.info({ question, hasSerper: !!services.serper }, 'runAssistant: starting Serper skill execution');
         try {
           logger.info('runAssistant: calling Serper orchestrator.run');
@@ -305,7 +307,11 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
         }
         logger.info('runAssistant: Serper skill execution completed');
       } else {
-        logger.info('runAssistant: Serper service not available, skipping');
+        if (!ENABLE_SERPER) {
+          logger.info('runAssistant: Serper skill disabled for testing');
+        } else {
+          logger.info('runAssistant: Serper service not available, skipping');
+        }
       }
 
       logger.info('runAssistant: building evidence');
