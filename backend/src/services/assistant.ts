@@ -365,24 +365,27 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
           
           // Check if we've already used too much time - if so, skip OpenAI and use fallback
           // Vercel Pro has 60s timeout, Hobby has 10s timeout
-          // We need to finish well before 10s if on Hobby tier
-          // Aim to complete within 8 seconds to be safe (leave 2s buffer)
+          // OpenAI call timeout is 5s, so we need at least 5-6s remaining
+          // For Hobby tier (10s): allow OpenAI if we've used < 4s (leaves 5s for OpenAI + 1s buffer)
+          // For Pro tier (60s): allow OpenAI if we've used < 50s (leaves 10s for OpenAI + buffer)
+          // Default to conservative Hobby tier limits for safety
           const timeUsedSoFar = performance.now() - started;
-          const maxTimeForOpenAI = 3000; // 3 seconds - allow OpenAI call only if we're very early
-          // If we've used more than 3 seconds, we probably don't have enough time for OpenAI call (5s) + response
+          const maxTimeForOpenAI = 4000; // 4 seconds - allows OpenAI call (5s) with 1s buffer before 10s limit
           
           if (timeUsedSoFar > maxTimeForOpenAI) {
             logger.warn({ 
               timeUsedSoFar: Math.round(timeUsedSoFar),
-              maxTimeForOpenAI 
+              maxTimeForOpenAI,
+              estimatedTotal: Math.round(timeUsedSoFar + 5000) // Time if we add OpenAI call
             }, 'runAssistant: skipping OpenAI call - too much time already used, using fallback');
             // Skip OpenAI call and use fallback (agentOutput will remain undefined)
           } else {
-            const timeRemaining = 60000 - timeUsedSoFar; // Assume 60s Vercel limit (adjust if Hobby tier)
+            const estimatedTimeRemaining = 10000 - timeUsedSoFar; // Assume Hobby tier 10s limit for safety
             logger.info({ 
               timeUsedSoFar: Math.round(timeUsedSoFar),
-              timeRemaining: Math.round(timeRemaining),
-              maxTimeForOpenAI 
+              estimatedTimeRemaining: Math.round(estimatedTimeRemaining),
+              maxTimeForOpenAI,
+              estimatedTotalIfOpenAI: Math.round(timeUsedSoFar + 5000)
             }, 'runAssistant: proceeding with OpenAI call - time check passed');
             const agentCall = await withTrace<AgentOutput>(
             {
