@@ -55,10 +55,12 @@ export class OpenAIAgent implements Agent {
       model: this.model
     }, 'OpenAIAgent.generate: starting API call');
 
-    // Add timeout to prevent hanging (1.5 seconds max - we've already used ~3.5s, so keep it very short)
-    // This ensures we have time to return a response before Vercel kills the function
-    // Using 1.5 seconds to be extremely aggressive and trigger before Vercel kills us
-    const timeoutMs = 1500;
+    // Add timeout to prevent hanging
+    // We've typically used 3-5 seconds so far (database + Serper)
+    // Vercel Pro has 60s timeout, Hobby has 10s timeout
+    // Use 10 seconds for OpenAI call - gives enough time but prevents hangs
+    // The overall function should complete within ~15 seconds total
+    const timeoutMs = 10000; // 10 seconds - reasonable timeout for OpenAI API call
     const startTime = Date.now();
     const controller = new AbortController();
 
@@ -67,10 +69,20 @@ export class OpenAIAgent implements Agent {
     const progressCheckInterval = setInterval(() => {
       const elapsed = Date.now() - startTime;
       console.log(`[OpenAIAgent] Still waiting for OpenAI response... elapsed: ${elapsed}ms, timeout at: ${timeoutMs}ms`);
-    }, 1000); // Check every 1 second
+    }, 2000); // Check every 2 seconds
     
-    // No specific checks needed (timeout is 1.5s, very short)
-    const specificChecks: NodeJS.Timeout[] = [];
+    // Add safety checks at 7s and 9s to monitor progress
+    const safetyCheck7s = setTimeout(() => {
+      const elapsed = Date.now() - startTime;
+      console.log(`[OpenAIAgent] Safety check at 7s - elapsed: ${elapsed}ms, timeout will trigger in ~${timeoutMs - elapsed}ms`);
+    }, 7000);
+    
+    const safetyCheck9s = setTimeout(() => {
+      const elapsed = Date.now() - startTime;
+      console.log(`[OpenAIAgent] Safety check at 9s - elapsed: ${elapsed}ms, timeout will trigger in ~${timeoutMs - elapsed}ms`);
+    }, 9000);
+    
+    const specificChecks: NodeJS.Timeout[] = [safetyCheck7s, safetyCheck9s];
 
     let response;
     try {
@@ -109,13 +121,6 @@ export class OpenAIAgent implements Agent {
         }, timeoutMs);
         console.log(`[OpenAIAgent] Timeout promise created, timeoutId: ${timeoutId ? 'set' : 'not set'}`);
       });
-      
-      // Also add a safety check at 1.2 seconds to confirm the timeout will trigger
-      // This is OUTSIDE the Promise constructor to ensure it's set immediately
-      setTimeout(() => {
-        const elapsed = Date.now() - startTime;
-        console.log(`[OpenAIAgent] Safety check at 1.2s - elapsed: ${elapsed}ms, timeout will trigger in ~${timeoutMs - elapsed}ms`);
-      }, 1200);
       
       console.log(`[OpenAIAgent] API call promise created, awaiting response with Promise.race...`);
       console.log(`[OpenAIAgent] About to await Promise.race([apiCallPromise, timeoutPromise])`);

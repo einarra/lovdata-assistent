@@ -364,11 +364,13 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
           }, 'runAssistant: calling OpenAI agent');
           
           // Check if we've already used too much time - if so, skip OpenAI and use fallback
-          // We've already used ~3.5s (database timeout + Serper), so ALWAYS skip OpenAI
-          // The timeout mechanism isn't reliable in Vercel, and OpenAI calls are consistently
-          // causing the function to be killed. Skip proactively to ensure we can return a response.
+          // Vercel Pro has 60s timeout, Hobby has 10s timeout
+          // We need to leave buffer for response serialization and network time
+          // Aim to complete within 45 seconds to be safe
           const timeUsedSoFar = performance.now() - started;
-          const maxTimeForOpenAI = 3300; // 3.3 seconds max - always skip OpenAI after database timeout
+          const maxTimeForOpenAI = 40000; // 40 seconds - allow OpenAI call if we're still within reasonable time
+          const minTimeRemaining = 5000; // Need at least 5 seconds remaining for OpenAI call and response
+          
           if (timeUsedSoFar > maxTimeForOpenAI) {
             logger.warn({ 
               timeUsedSoFar: Math.round(timeUsedSoFar),
@@ -376,8 +378,10 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
             }, 'runAssistant: skipping OpenAI call - too much time already used, using fallback');
             // Skip OpenAI call and use fallback (agentOutput will remain undefined)
           } else {
+            const timeRemaining = 60000 - timeUsedSoFar; // Assume 60s Vercel limit (adjust if Hobby tier)
             logger.info({ 
               timeUsedSoFar: Math.round(timeUsedSoFar),
+              timeRemaining: Math.round(timeRemaining),
               maxTimeForOpenAI 
             }, 'runAssistant: proceeding with OpenAI call - time check passed');
             const agentCall = await withTrace<AgentOutput>(
