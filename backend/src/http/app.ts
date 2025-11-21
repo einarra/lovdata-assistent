@@ -473,25 +473,54 @@ export function createApp() {
 
       // HTTP headers must only contain ASCII characters
       // Vercel will reject headers with non-ASCII characters
-      // Only set headers if they contain only ASCII characters
-      if (title) {
+      // Only set headers if they contain only ASCII characters (0-127)
+      if (title && typeof title === 'string') {
         // Check if title contains only ASCII characters
-        const isAscii = /^[\x00-\x7F]*$/.test(title);
+        // ASCII range is 0-127 (0x00-0x7F)
+        let isAscii = true;
+        for (let i = 0; i < title.length; i++) {
+          if (title.charCodeAt(i) > 127) {
+            isAscii = false;
+            break;
+          }
+        }
+        
         if (isAscii) {
           res.setHeader('X-Lovdata-Title', title);
+          logger.debug({ title }, 'Setting X-Lovdata-Title header (ASCII)');
         } else {
           // Skip header if it contains non-ASCII characters
-          logger.debug({ title }, 'Skipping X-Lovdata-Title header - contains non-ASCII characters');
+          logger.info({ 
+            title, 
+            titleLength: title.length,
+            firstNonAsciiIndex: Array.from(title).findIndex((c, i) => title.charCodeAt(i) > 127)
+          }, 'Skipping X-Lovdata-Title header - contains non-ASCII characters');
         }
+      } else if (title) {
+        logger.warn({ title, titleType: typeof title }, 'Skipping X-Lovdata-Title header - not a string');
       }
-      if (date) {
+      
+      if (date && typeof date === 'string') {
         // Date should be ASCII, but check anyway
-        const isAscii = /^[\x00-\x7F]*$/.test(date);
+        let isAscii = true;
+        for (let i = 0; i < date.length; i++) {
+          if (date.charCodeAt(i) > 127) {
+            isAscii = false;
+            break;
+          }
+        }
+        
         if (isAscii) {
           res.setHeader('X-Lovdata-Date', date);
+          logger.debug({ date }, 'Setting X-Lovdata-Date header (ASCII)');
         } else {
-          logger.debug({ date }, 'Skipping X-Lovdata-Date header - contains non-ASCII characters');
+          logger.info({ 
+            date, 
+            dateLength: date.length 
+          }, 'Skipping X-Lovdata-Date header - contains non-ASCII characters');
         }
+      } else if (date) {
+        logger.warn({ date, dateType: typeof date }, 'Skipping X-Lovdata-Date header - not a string');
       }
 
       if (format === 'markdown') {
