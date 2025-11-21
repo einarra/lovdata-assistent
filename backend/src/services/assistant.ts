@@ -365,11 +365,11 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
           
           // Check if we've already used too much time - if so, skip OpenAI and use fallback
           // Vercel Pro has 60s timeout, Hobby has 10s timeout
-          // We need to leave buffer for response serialization and network time
-          // Aim to complete within 45 seconds to be safe
+          // We need to finish well before 10s if on Hobby tier
+          // Aim to complete within 8 seconds to be safe (leave 2s buffer)
           const timeUsedSoFar = performance.now() - started;
-          const maxTimeForOpenAI = 40000; // 40 seconds - allow OpenAI call if we're still within reasonable time
-          const minTimeRemaining = 5000; // Need at least 5 seconds remaining for OpenAI call and response
+          const maxTimeForOpenAI = 3000; // 3 seconds - allow OpenAI call only if we're very early
+          // If we've used more than 3 seconds, we probably don't have enough time for OpenAI call (5s) + response
           
           if (timeUsedSoFar > maxTimeForOpenAI) {
             logger.warn({ 

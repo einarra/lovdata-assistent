@@ -32,7 +32,13 @@ export class OpenAIAgent implements Agent {
     if (!env.OPENAI_API_KEY) {
       throw new Error('OPENAI_API_KEY is not configured');
     }
-    this.client = new OpenAI({ apiKey: env.OPENAI_API_KEY });
+    // Configure OpenAI client with timeout to prevent hanging
+    // Add timeout at the client level as a fallback
+    this.client = new OpenAI({ 
+      apiKey: env.OPENAI_API_KEY,
+      timeout: 6000, // 6 seconds client-level timeout (slightly longer than our Promise.race timeout)
+      maxRetries: 0 // Disable retries to avoid delays
+    });
     this.model = options.model ?? env.OPENAI_MODEL;
     this.temperature = options.temperature ?? env.OPENAI_TEMPERATURE;
   }
@@ -58,9 +64,10 @@ export class OpenAIAgent implements Agent {
     // Add timeout to prevent hanging
     // We've typically used 3-5 seconds so far (database + Serper)
     // Vercel Pro has 60s timeout, Hobby has 10s timeout
-    // Use 10 seconds for OpenAI call - gives enough time but prevents hangs
-    // The overall function should complete within ~15 seconds total
-    const timeoutMs = 10000; // 10 seconds - reasonable timeout for OpenAI API call
+    // We need to finish well before 10s if on Hobby tier
+    // Use 5 seconds for OpenAI call - aggressive but ensures we finish before Vercel kills us
+    // The overall function should complete within ~8-10 seconds total
+    const timeoutMs = 5000; // 5 seconds - aggressive timeout to finish before Vercel Hobby limit
     const startTime = Date.now();
     const controller = new AbortController();
 
@@ -91,6 +98,10 @@ export class OpenAIAgent implements Agent {
       console.log(`[OpenAIAgent] About to call OpenAI API with AbortController signal`);
       
       // Create the API call promise
+      // Log before creating the promise to see if we get here
+      console.log(`[OpenAIAgent] About to create chat.completions.create call...`);
+      console.log(`[OpenAIAgent] Model: ${this.model}, prompt length: ${prompt.length}, evidence count: ${input.evidence.length}`);
+      
       const apiCallPromise = this.client.chat.completions.create(
         {
           model: this.model,
@@ -99,12 +110,20 @@ export class OpenAIAgent implements Agent {
             { role: 'system', content: SYSTEM_PROMPT },
             { role: 'user', content: prompt }
           ],
-          response_format: { type: 'json_object' }
+          response_format: { type: 'json_object' },
+          max_tokens: 1000 // Limit tokens to ensure faster response
         },
         {
           signal: controller.signal
         }
-      );
+      ).catch(error => {
+        // Log immediately if the promise rejects
+        const elapsed = Date.now() - startTime;
+        console.log(`[OpenAIAgent] API call promise rejected immediately after ${elapsed}ms:`, error instanceof Error ? error.message : String(error));
+        throw error;
+      });
+      
+      console.log(`[OpenAIAgent] chat.completions.create promise created (not awaited yet)`);
       
       // Create a timeout promise that will reject if the API call takes too long
       // Use a separate timeout ID so we can log when it's set up
@@ -141,7 +160,23 @@ export class OpenAIAgent implements Agent {
       ]);
       
       console.log(`[OpenAIAgent] Promise.race created, awaiting result...`);
-      response = await racePromise;
+      
+      // Add an immediate check to confirm we're actually awaiting
+      setTimeout(() => {
+        const elapsed = Date.now() - startTime;
+        console.log(`[OpenAIAgent] Immediate check (0.5s) - elapsed: ${elapsed}ms, still awaiting...`);
+      }, 500);
+      
+      // Wrap the await in a try-catch with more detailed logging
+      try {
+        console.log(`[OpenAIAgent] About to await racePromise...`);
+        response = await racePromise;
+        console.log(`[OpenAIAgent] racePromise resolved successfully`);
+      } catch (raceError) {
+        const elapsed = Date.now() - startTime;
+        console.log(`[OpenAIAgent] racePromise rejected after ${elapsed}ms:`, raceError instanceof Error ? raceError.message : String(raceError));
+        throw raceError;
+      }
       
       // Clear all timeouts and intervals
       clearInterval(progressCheckInterval);
