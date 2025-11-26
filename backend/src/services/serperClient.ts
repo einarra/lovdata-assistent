@@ -65,6 +65,7 @@ export class SerperClient {
       
       // Add progress checks while waiting for fetch - set up BEFORE fetch to ensure they run
       let progressCheckInterval: NodeJS.Timeout | null = null;
+      const progressCheckTimeouts: NodeJS.Timeout[] = [];
       
       // Start progress checks immediately
       console.log(`[SerperClient] Setting up progress checks...`);
@@ -73,21 +74,21 @@ export class SerperClient {
         console.log(`[SerperClient] Still waiting for response... elapsed: ${elapsed}ms, timeout at: ${timeoutMs}ms`);
       }, 1000); // Check every 1 second for faster feedback
       
-      // Also add immediate checks at 1, 2, 3 seconds
-      setTimeout(() => {
+      // Also add immediate checks at 1, 2, 3 seconds - store references to clear them later
+      progressCheckTimeouts.push(setTimeout(() => {
         const elapsed = Date.now() - startTime;
         console.log(`[SerperClient] 1 second check - elapsed: ${elapsed}ms`);
-      }, 1000);
+      }, 1000));
       
-      setTimeout(() => {
+      progressCheckTimeouts.push(setTimeout(() => {
         const elapsed = Date.now() - startTime;
         console.log(`[SerperClient] 2 second check - elapsed: ${elapsed}ms`);
-      }, 2000);
+      }, 2000));
       
-      setTimeout(() => {
+      progressCheckTimeouts.push(setTimeout(() => {
         const elapsed = Date.now() - startTime;
         console.log(`[SerperClient] 3 second check - elapsed: ${elapsed}ms`);
-      }, 3000);
+      }, 3000));
       
       console.log(`[SerperClient] Progress checks set up, calling fetch...`);
       
@@ -103,8 +104,12 @@ export class SerperClient {
         // Clear progress checks when fetch completes (success or error)
         if (progressCheckInterval) {
           clearInterval(progressCheckInterval);
-          console.log(`[SerperClient] Progress checks cleared`);
+          progressCheckInterval = null;
         }
+        // Clear all progress check timeouts
+        progressCheckTimeouts.forEach(timeout => clearTimeout(timeout));
+        progressCheckTimeouts.length = 0;
+        console.log(`[SerperClient] Progress checks cleared`);
       });
       
       console.log(`[SerperClient] Fetch promise created, awaiting response...`);
@@ -126,6 +131,7 @@ export class SerperClient {
       return jsonResult;
     } catch (error) {
       clearTimeout(timeoutId);
+      // Note: Progress checks are already cleared in the finally block of fetchPromise
       const elapsed = Date.now() - startTime;
       console.log(`[SerperClient] Catch block entered after ${elapsed}ms`);
       console.log(`[SerperClient] Error after ${elapsed}ms:`, error instanceof Error ? error.message : String(error));
