@@ -36,7 +36,7 @@ export class OpenAIAgent implements Agent {
     // Add timeout at the client level as a fallback
     this.client = new OpenAI({ 
       apiKey: env.OPENAI_API_KEY,
-      timeout: 3000, // 3 seconds client-level timeout (slightly longer than our Promise.race timeout of 2s)
+      timeout: 6000, // 6 seconds client-level timeout (slightly longer than our Promise.race timeout of 5s)
       maxRetries: 0 // Disable retries to avoid delays
     });
     this.model = options.model ?? env.OPENAI_MODEL;
@@ -64,10 +64,10 @@ export class OpenAIAgent implements Agent {
     // Add timeout to prevent hanging
     // We've typically used 2-3 seconds so far (database + Serper + evidence)
     // Vercel Pro has 60s timeout, Hobby has 10s timeout
-    // Vercel appears to be killing functions around 2-3 seconds, so we need an even more aggressive timeout
-    // Use 2 seconds for OpenAI call - extremely aggressive to ensure timeout triggers before Vercel kills us
-    // Total function time: ~2.3s (current) + 2s (OpenAI) = ~4.3s, well under 10s limit
-    const timeoutMs = 2000; // 2 seconds - extremely aggressive timeout to finish before Vercel kills us
+    // OpenAI API calls typically take 3-5 seconds, especially with large prompts
+    // Use 5 seconds for OpenAI call - this allows enough time for the API while still leaving buffer
+    // Total function time: ~2.7s (current) + 5s (OpenAI) = ~7.7s, well under 10s limit
+    const timeoutMs = 5000; // 5 seconds - allows OpenAI API to complete while leaving buffer before Vercel timeout
     const startTime = Date.now();
     const controller = new AbortController();
 
@@ -76,25 +76,30 @@ export class OpenAIAgent implements Agent {
     const progressCheckInterval = setInterval(() => {
       const elapsed = Date.now() - startTime;
       console.log(`[OpenAIAgent] Still waiting for OpenAI response... elapsed: ${elapsed}ms, timeout at: ${timeoutMs}ms`);
-    }, 500); // Check every 500ms - more frequent to catch issues early
+    }, 1000); // Check every 1 second to monitor progress
     
-    // Add safety checks at 0.5s, 1s, and 1.5s to monitor progress (timeout is 2s)
-    const safetyCheck05s = setTimeout(() => {
-      const elapsed = Date.now() - startTime;
-      console.log(`[OpenAIAgent] Safety check at 0.5s - elapsed: ${elapsed}ms, timeout will trigger in ~${timeoutMs - elapsed}ms`);
-    }, 500);
-    
+    // Add safety checks at 1s, 2s, 3s, and 4s to monitor progress (timeout is 5s)
     const safetyCheck1s = setTimeout(() => {
       const elapsed = Date.now() - startTime;
       console.log(`[OpenAIAgent] Safety check at 1s - elapsed: ${elapsed}ms, timeout will trigger in ~${timeoutMs - elapsed}ms`);
     }, 1000);
     
-    const safetyCheck15s = setTimeout(() => {
+    const safetyCheck2s = setTimeout(() => {
       const elapsed = Date.now() - startTime;
-      console.log(`[OpenAIAgent] Safety check at 1.5s - elapsed: ${elapsed}ms, timeout will trigger in ~${timeoutMs - elapsed}ms`);
-    }, 1500);
+      console.log(`[OpenAIAgent] Safety check at 2s - elapsed: ${elapsed}ms, timeout will trigger in ~${timeoutMs - elapsed}ms`);
+    }, 2000);
     
-    const specificChecks: NodeJS.Timeout[] = [safetyCheck05s, safetyCheck1s, safetyCheck15s];
+    const safetyCheck3s = setTimeout(() => {
+      const elapsed = Date.now() - startTime;
+      console.log(`[OpenAIAgent] Safety check at 3s - elapsed: ${elapsed}ms, timeout will trigger in ~${timeoutMs - elapsed}ms`);
+    }, 3000);
+    
+    const safetyCheck4s = setTimeout(() => {
+      const elapsed = Date.now() - startTime;
+      console.log(`[OpenAIAgent] Safety check at 4s - elapsed: ${elapsed}ms, timeout will trigger in ~${timeoutMs - elapsed}ms`);
+    }, 4000);
+    
+    const specificChecks: NodeJS.Timeout[] = [safetyCheck1s, safetyCheck2s, safetyCheck3s, safetyCheck4s];
 
     let response;
     try {
