@@ -160,6 +160,14 @@ The React frontend is built and served as static files:
    - Check Vercel logs for timeout errors
    - Consider upgrading to Pro plan if you need longer execution times
 
+5. **Deprecation warnings:**
+   - You may see `[DEP0169] DeprecationWarning: url.parse()` warnings in logs
+   - This comes from dependencies (likely `@supabase/supabase-js` or Express dependencies), not our code
+   - Our code uses the modern WHATWG URL API (`new URL()`)
+   - This warning is informational and doesn't affect functionality
+   - It will be resolved when dependencies are updated by their maintainers
+   - To suppress (not recommended): Set `NODE_OPTIONS=--no-deprecation` in Vercel environment variables
+
 ### Database/Archive Issues
 
 1. **Archive store not initializing:**
