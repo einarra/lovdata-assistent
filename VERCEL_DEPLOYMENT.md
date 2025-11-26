@@ -152,6 +152,14 @@ The React frontend is built and served as static files:
    - Consider upgrading to Pro plan for longer timeouts
    - Optimize initialization code in `backend/src/serverless.ts`
 
+4. **Function execution timeouts:**
+   - **Hobby plan:** 10 seconds maximum execution time
+   - **Pro plan:** 60 seconds (as configured in `vercel.json`)
+   - The code includes timeout checks to skip expensive operations (OpenAI, evidence hydration) if running low on time
+   - If you see logs cutting off mid-execution, the function likely hit Vercel's timeout limit
+   - Check Vercel logs for timeout errors
+   - Consider upgrading to Pro plan if you need longer execution times
+
 ### Database/Archive Issues
 
 1. **Archive store not initializing:**

@@ -8,6 +8,7 @@ import { KontaktOss } from './pages/kontaktOss';
 import './App.css';
 import { supabase } from './lib/supabaseClient';
 import { useSupabaseSession } from './hooks/useSupabaseSession';
+import { Analytics } from '@vercel/analytics/react';
 
 function App() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -504,6 +505,7 @@ function App() {
             : 'Ingen aktivt abonnement registrert.'}
         </p>
       </footer>
+      <Analytics />
     </div>
   );
 }

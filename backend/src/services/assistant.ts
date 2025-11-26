@@ -346,9 +346,29 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
       let usedAgent = false;
 
       if (agent && evidenceWithUpdatedLinks.length > 0) {
-        logger.info({ evidenceCount: evidenceWithUpdatedLinks.length }, 'runAssistant: hydrating evidence content for agent');
-        agentEvidence = limitAgentEvidence(await hydrateEvidenceContent(evidenceWithUpdatedLinks, services));
-        logger.info({ hydratedCount: agentEvidence.length }, 'runAssistant: evidence content hydrated');
+        // Check time before hydrating evidence - this can be slow
+        const timeBeforeHydration = performance.now() - started;
+        const maxTimeForHydration = 6000; // 6 seconds - allows 4s for hydration before 10s Vercel limit
+        
+        if (timeBeforeHydration > maxTimeForHydration) {
+          logger.warn({ 
+            timeUsedSoFar: Math.round(timeBeforeHydration),
+            maxTimeForHydration,
+            evidenceCount: evidenceWithUpdatedLinks.length
+          }, 'runAssistant: skipping evidence hydration - too much time already used, using snippets only');
+          // Use evidence without full content hydration
+          agentEvidence = limitAgentEvidence(evidenceWithUpdatedLinks.map(item => ({
+            ...item,
+            content: null // No full content, just snippets
+          })));
+        } else {
+          logger.info({ 
+            evidenceCount: evidenceWithUpdatedLinks.length,
+            timeUsedSoFar: Math.round(timeBeforeHydration)
+          }, 'runAssistant: hydrating evidence content for agent');
+          agentEvidence = limitAgentEvidence(await hydrateEvidenceContent(evidenceWithUpdatedLinks, services));
+          logger.info({ hydratedCount: agentEvidence.length }, 'runAssistant: evidence content hydrated');
+        }
         try {
           const traceEvidenceSample = agentEvidence.slice(0, Math.min(agentEvidence.length, 5)).map(item => ({
             id: item.id,
@@ -554,7 +574,9 @@ async function updateLinksForHtmlContent(evidence: AgentEvidence[], services: Se
     }, overallTimeoutMs);
   });
   
-  const updatePromise = Promise.all(
+  // Use Promise.allSettled to ensure we get results even if some fetches fail
+  // This prevents one slow fetch from blocking all results
+  const updatePromise = Promise.allSettled(
     evidence.map(async (item, index) => {
       logger.debug({ index, evidenceId: item.id }, 'updateLinksForHtmlContent: processing item');
       
@@ -638,11 +660,41 @@ async function updateLinksForHtmlContent(evidence: AgentEvidence[], services: Se
     })
   );
   
-  // Race between Promise.all and overall timeout
+  // Race between Promise.allSettled and overall timeout
+  // Reduce overall timeout to 8 seconds to avoid Vercel timeout (10s for Hobby, 60s for Pro)
+  // This gives us time to complete before Vercel kills the function
+  const reducedTimeoutMs = Math.min(overallTimeoutMs, 8000);
+  const reducedTimeoutPromise = new Promise<never>((_, reject) => {
+    setTimeout(() => {
+      const elapsed = Date.now() - overallStartTime;
+      logger.warn({ 
+        elapsedMs: elapsed, 
+        evidenceCount: evidence.length,
+        timeoutMs: reducedTimeoutMs 
+      }, 'updateLinksForHtmlContent: reduced timeout reached, returning partial results');
+      reject(new Error(`updateLinksForHtmlContent timed out after ${reducedTimeoutMs}ms`));
+    }, reducedTimeoutMs);
+  });
+  
   let results;
   try {
     logger.info('updateLinksForHtmlContent: awaiting all document fetches with overall timeout');
-    results = await Promise.race([updatePromise, overallTimeoutPromise]);
+    const settledResults = await Promise.race([updatePromise, reducedTimeoutPromise]);
+    
+    // Extract results from settled promises
+    results = settledResults.map((settled, index) => {
+      if (settled.status === 'fulfilled') {
+        return settled.value;
+      } else {
+        logger.warn({ 
+          index, 
+          error: settled.reason,
+          evidenceId: evidence[index]?.id 
+        }, 'updateLinksForHtmlContent: item processing failed, using original');
+        return evidence[index]; // Return original item if processing failed
+      }
+    });
+    
     const elapsed = Date.now() - overallStartTime;
     logger.info({ 
       processedCount: results.length,
@@ -674,13 +726,16 @@ async function hydrateEvidenceContent(evidence: AgentEvidence[], services: Servi
   }
 
   const contentCache = new Map<string, string>();
+  const hydrationStartTime = Date.now();
+  const hydrationTimeoutMs = 4000; // 4 seconds max for hydration to avoid Vercel timeout
   
   logger.info({ 
     hasArchive: !!archiveStore,
-    hasLovdata: !!lovdataClient
+    hasLovdata: !!lovdataClient,
+    timeoutMs: hydrationTimeoutMs
   }, 'hydrateEvidenceContent: processing evidence items');
 
-  const results = await Promise.all(
+  const hydrationPromise = Promise.allSettled(
     evidence.map(async (item, index) => {
       logger.debug({ index, evidenceId: item.id }, 'hydrateEvidenceContent: processing item');
       const metadata = item.metadata ?? {};
@@ -761,9 +816,50 @@ async function hydrateEvidenceContent(evidence: AgentEvidence[], services: Servi
     })
   );
   
+  // Add timeout to prevent hanging
+  const hydrationTimeoutPromise = new Promise<never>((_, reject) => {
+    setTimeout(() => {
+      const elapsed = Date.now() - hydrationStartTime;
+      logger.warn({ 
+        elapsedMs: elapsed,
+        evidenceCount: evidence.length,
+        timeoutMs: hydrationTimeoutMs
+      }, 'hydrateEvidenceContent: timeout reached, returning partial results');
+      reject(new Error(`hydrateEvidenceContent timed out after ${hydrationTimeoutMs}ms`));
+    }, hydrationTimeoutMs);
+  });
+  
+  let settledResults;
+  try {
+    settledResults = await Promise.race([hydrationPromise, hydrationTimeoutPromise]);
+  } catch (timeoutError) {
+    // Timeout occurred - return evidence without full content
+    logger.warn({ 
+      err: timeoutError,
+      evidenceCount: evidence.length
+    }, 'hydrateEvidenceContent: timeout, returning evidence without full content');
+    return evidence.map(item => ({ ...item, content: null }));
+  }
+  
+  // Extract results from settled promises
+  const results = settledResults.map((settled, index) => {
+    if (settled.status === 'fulfilled') {
+      return settled.value;
+    } else {
+      logger.warn({ 
+        index, 
+        error: settled.reason,
+        evidenceId: evidence[index]?.id 
+      }, 'hydrateEvidenceContent: item processing failed, using original without content');
+      return { ...evidence[index], content: null }; // Return original item without content if processing failed
+    }
+  });
+  
+  const elapsed = Date.now() - hydrationStartTime;
   logger.info({ 
     processedCount: results.length,
-    cacheSize: contentCache.size
+    cacheSize: contentCache.size,
+    elapsedMs: elapsed
   }, 'hydrateEvidenceContent: completed');
   
   return results;
