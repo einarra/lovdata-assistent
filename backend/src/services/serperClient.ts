@@ -47,7 +47,16 @@ export class SerperClient {
         // - /forskrift/ (regulations)
         // - /rundskriv/ (circulars)
         // - /vedtak/ (decisions)
-        siteQuery = `site:${normalizedSite} (inurl:/dokument/ OR inurl:/lov/ OR inurl:/forskrift/ OR inurl:/rundskriv/ OR inurl:/vedtak/) `;
+        // - /avgjørelser/ (decisions)
+        // - /lokaleForskrifte/ (local regulations)
+        // - /lovtidend/ (law gazette)
+        // - /eosavtalen/ (EEA agreement)
+        // - /traktater/ (treaties)
+        // - /trygderetten/ (social security court)
+        // - /tariffavtaler/ (collective agreements)
+        // - /husleietvistutvalget/ (rent dispute committee)
+        // - /sph2025/ (State Personnel Handbook 2025)
+        siteQuery = `site:${normalizedSite} (inurl:/dokument/ OR inurl:/lov/ OR inurl:/forskrift/ OR inurl:/rundskriv/ OR inurl:/vedtak/ OR inurl:/avgjørelser/ OR inurl:/lokaleForskrifte/ OR inurl:/lovtidend/ OR inurl:/eosavtalen/ OR inurl:/traktater/ OR inurl:/trygderetten/ OR inurl:/tariffavtaler/ OR inurl:/husleietvistutvalget/ OR inurl:/sph2025/) `;
       } else {
         siteQuery = `site:${normalizedSite} `;
       }
@@ -183,6 +192,15 @@ export class SerperClient {
       /\/vedtak\//,
       /\/lovsamling\//,
       /\/historikk\//,
+      /\/avgjørelser\//,
+      /\/lokaleForskrifte\//,
+      /\/lovtidend\//,
+      /\/eosavtalen\//,
+      /\/traktater\//,
+      /\/trygderetten\//,
+      /\/tariffavtaler\//,
+      /\/husleietvistutvalget\//,
+      /\/sph2025\//,
     ];
     return documentPatterns.some(pattern => pattern.test(url));
   }
