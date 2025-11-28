@@ -886,14 +886,20 @@ export class SupabaseArchiveStore {
     
     this.logs.info('searchAsync: no error, processing results');
 
-    const total = count ?? 0;
-    this.logs.info({ total, dataLength: data?.length ?? 0 }, 'searchAsync: checking if results are empty');
+    // For chunk searches, count may not be available, so use data length if we have data
+    // For document searches, count should be available from the RPC function
+    const total = count ?? (data && data.length > 0 ? data.length : 0);
+    this.logs.info({ total, count, dataLength: data?.length ?? 0 }, 'searchAsync: checking if results are empty');
     
-    if (total === 0 || !data || data.length === 0) {
+    // If we have data, use it even if count is 0 (chunk searches don't return count)
+    if (!data || data.length === 0) {
       searchTimer.end({ hits: 0, total: 0 });
       this.logs.info('searchAsync: returning empty results (no data)');
       return { hits: [], total: 0 };
     }
+    
+    // If we have data but count is 0, use data length as total
+    const effectiveTotal = count && count > 0 ? count : data.length;
     
     this.logs.info({ dataLength: data.length, total }, 'searchAsync: processing non-empty results');
 
@@ -938,14 +944,15 @@ export class SupabaseArchiveStore {
     });
     snippetTimer.end({ snippetCount: hits.length });
 
-    searchTimer.end({ hits: hits.length, total });
+    searchTimer.end({ hits: hits.length, total: effectiveTotal });
     
     this.logs.info({ 
       hitsCount: hits.length,
-      total
+      total: effectiveTotal,
+      originalCount: count
     }, 'searchAsync: returning final results');
 
-    return { hits, total };
+    return { hits, total: effectiveTotal };
   }
 
   private generateSnippet(content: string, tokens: string[], maxLength: number): string {
