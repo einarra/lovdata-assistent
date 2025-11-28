@@ -36,7 +36,7 @@ export class OpenAIAgent implements Agent {
     // Add timeout at the client level as a fallback
     this.client = new OpenAI({ 
       apiKey: env.OPENAI_API_KEY,
-      timeout: 55000, // 55 seconds client-level timeout (slightly longer than our Promise.race max timeout of 50s)
+      timeout: 60000, // 60 seconds client-level timeout (matches our Promise.race max timeout of 55s, with small buffer)
       maxRetries: 0 // Disable retries to avoid delays
     });
     this.model = options.model ?? env.OPENAI_MODEL;
@@ -58,12 +58,13 @@ export class OpenAIAgent implements Agent {
     // Calculate adaptive timeout based on prompt size
     // Larger prompts take longer to process
     // With Vercel Pro 60s limit, we have plenty of headroom (~57s remaining after setup)
-    // Base timeout: 20 seconds for small prompts
-    // Add 3 seconds per 10KB of prompt (up to 50 seconds max)
+    // Use a generous fixed timeout since we have headroom - simpler and more reliable
+    // Base timeout: 30 seconds for all prompts
+    // Add 2 seconds per 10KB of prompt (up to 55 seconds max to leave 5s buffer)
     const promptSizeKB = prompt.length / 1024;
-    const baseTimeout = 20000; // 20 seconds base (increased from 10s)
-    const additionalTimeout = Math.min(promptSizeKB * 300, 30000); // 3s per 10KB, max 30s additional
-    const timeoutMs = Math.min(baseTimeout + additionalTimeout, 50000); // Max 50 seconds (increased from 30s)
+    const baseTimeout = 30000; // 30 seconds base (increased from 20s)
+    const additionalTimeout = Math.min(promptSizeKB * 200, 25000); // 2s per 10KB, max 25s additional
+    const timeoutMs = Math.min(baseTimeout + additionalTimeout, 55000); // Max 55 seconds (leaves 5s buffer for Vercel)
     
     logger.info({ 
       question: input.question,
