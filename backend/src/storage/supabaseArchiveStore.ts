@@ -771,6 +771,11 @@ export class SupabaseArchiveStore {
     let data: any[] | null | undefined;
     let error: any | null | undefined;
     let count: number | null | undefined;
+    
+    // Declare timeout variables outside try block so they're accessible in catch
+    let progressInterval: NodeJS.Timeout | undefined;
+    let outerSafetyCheckTimeouts: NodeJS.Timeout[] = [];
+    
     try {
       this.logs.info({ queryStartTime, timeoutMs }, 'searchAsync: waiting for query result with timeout');
       
@@ -782,13 +787,13 @@ export class SupabaseArchiveStore {
       // Log every 5 seconds for longer timeout
       // Also log more frequently to catch issues early
       this.logs.info('searchAsync: setting up progress interval');
-      const progressInterval = setInterval(() => {
+      progressInterval = setInterval(() => {
         const elapsed = Date.now() - queryStartTime;
         this.logs.info({ elapsedMs: elapsed, timeoutMs, progress: `${Math.round((elapsed / timeoutMs) * 100)}%` }, 'searchAsync: still waiting for query (progress check)');
       }, 5000);
       
       // Store references to all safety check timeouts for cleanup
-      const outerSafetyCheckTimeouts: NodeJS.Timeout[] = [];
+      outerSafetyCheckTimeouts = [];
       
       // Also log after 1, 3, and 5 seconds to track progress
       const safetyCheck1s = setTimeout(() => {
@@ -868,12 +873,10 @@ export class SupabaseArchiveStore {
       if (timeoutHandle) {
         clearTimeout(timeoutHandle);
       }
-      if (typeof progressInterval !== 'undefined') {
+      if (progressInterval) {
         clearInterval(progressInterval);
       }
-      if (typeof outerSafetyCheckTimeouts !== 'undefined') {
-        outerSafetyCheckTimeouts.forEach(timeout => clearTimeout(timeout));
-      }
+      outerSafetyCheckTimeouts.forEach((timeout: NodeJS.Timeout) => clearTimeout(timeout));
       this.logs.error({ 
         err: timeoutError, 
         elapsedMs: elapsed,
