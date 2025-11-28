@@ -120,6 +120,9 @@ const envSchema = z.object({
   OPENAI_API_KEY: z.string().optional().transform(val => val && val.trim() ? val.trim() : undefined),
   OPENAI_MODEL: z.string().default('gpt-4o-mini'),
   OPENAI_TEMPERATURE: z.coerce.number().min(0).max(2).default(1),
+  COHERE_API_KEY: z.string().optional().transform(val => val && val.trim() ? val.trim() : undefined),
+  COHERE_BASE_URL: z.string().url().optional().default('https://api.cohere.ai/v1'),
+  ENABLE_RERANKING: z.string().transform(val => val === 'true' || val === '1').default('true'),
   LANGSMITH_API_KEY: z.string().optional(),
   LANGSMITH_PROJECT: z.string().optional(),
   LANGSMITH_ENDPOINT: z.string().optional()

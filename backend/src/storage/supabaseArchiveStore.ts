@@ -2,6 +2,8 @@ import path from 'node:path';
 import type { Logger } from 'pino';
 import { logger as defaultLogger } from '../logger.js';
 import { getSupabaseAdminClient } from '../services/supabaseClient.js';
+import { EmbeddingService } from '../services/embeddingService.js';
+import { DocumentChunker, type DocumentChunk } from '../services/documentChunker.js';
 import type {
   ArchiveDocument,
   ArchiveIngestSession,
@@ -15,10 +17,37 @@ import { Timer } from '../utils/timing.js';
 export class SupabaseArchiveStore {
   private readonly supabase = getSupabaseAdminClient();
   private readonly logs: Logger;
+  private readonly embeddingService: EmbeddingService | null;
+  private readonly chunker: DocumentChunker;
   private initialized = false;
 
-  constructor(options?: { logger?: Logger }) {
+  constructor(options?: { logger?: Logger; enableEmbeddings?: boolean; enableChunking?: boolean }) {
     this.logs = options?.logger ?? defaultLogger;
+    
+    // Initialize embedding service if embeddings are enabled
+    // Check if OpenAI API key is available
+    try {
+      this.embeddingService = options?.enableEmbeddings !== false 
+        ? new EmbeddingService({ logger: this.logs })
+        : null;
+      if (this.embeddingService) {
+        this.logs.info('Embedding service initialized for vector search');
+      }
+    } catch (error) {
+      this.logs.warn({ err: error }, 'Embedding service not available - vector search will be disabled');
+      this.embeddingService = null;
+    }
+
+    // Initialize chunker (always enabled for better retrieval)
+    this.chunker = new DocumentChunker({
+      chunkSize: 12800,
+      overlapSize: 2560, // 20% overlap
+      preserveParagraphs: true,
+      extractSections: true
+    });
+    if (options?.enableChunking !== false) {
+      this.logs.info('Document chunker initialized');
+    }
   }
 
   /**
@@ -164,28 +193,74 @@ export class SupabaseArchiveStore {
         throw new Error(`Failed to delete existing documents: ${deleteError.message}`);
       }
 
-      // Step 3: Insert documents in batches
+      // Step 3: Generate embeddings if embedding service is available
+      let embeddings: number[][] | null = null;
+      if (this.embeddingService) {
+        const embeddingTimer = new Timer('generate_embeddings', this.logs, { 
+          filename, 
+          documentCount: documents.length 
+        });
+        
+        try {
+          // Generate embeddings for all documents
+          // Use content for embedding (title + content would be better, but content is most important)
+          const texts = documents.map(doc => doc.content);
+          embeddings = await this.embeddingService.generateEmbeddings(texts);
+          embeddingTimer.end({ embeddingCount: embeddings.length });
+          this.logs.info({ 
+            filename, 
+            embeddingCount: embeddings.length 
+          }, 'Generated embeddings for documents');
+        } catch (embeddingError) {
+          // Log error but don't fail the entire ingestion
+          // Documents will be inserted without embeddings
+          this.logs.error({ 
+            err: embeddingError, 
+            filename 
+          }, 'Failed to generate embeddings - documents will be inserted without embeddings');
+          embeddings = null;
+        }
+      }
+
+      // Step 4: Insert documents in batches with embeddings
       const batchSize = 500;
       const batchCount = Math.ceil(documents.length / batchSize);
+      const documentIds: Map<string, number> = new Map(); // Map (archive_filename, member) -> document_id
+      
       for (let i = 0; i < documents.length; i += batchSize) {
         const batch = documents.slice(i, i + batchSize);
         const batchTimer = new Timer('insert_documents_batch', this.logs, {
           filename,
           batchIndex: Math.floor(i / batchSize) + 1,
           batchCount,
-          batchSize: batch.length
+          batchSize: batch.length,
+          hasEmbeddings: embeddings !== null
         });
         
-        const rows = batch.map(doc => ({
-          archive_filename: doc.archiveFilename,
-          member: doc.member,
-          title: doc.title,
-          document_date: doc.date,
-          content: doc.content,
-          relative_path: doc.relativePath
-        }));
+        const rows = batch.map((doc, idx) => {
+          const row: any = {
+            archive_filename: doc.archiveFilename,
+            member: doc.member,
+            title: doc.title,
+            document_date: doc.date,
+            content: doc.content,
+            relative_path: doc.relativePath
+          };
+          
+          // Add embedding if available
+          // Supabase pgvector expects arrays directly, not strings
+          if (embeddings && embeddings[i + idx]) {
+            row.embedding = embeddings[i + idx];
+          }
+          
+          return row;
+        });
 
-        const { error: insertError } = await this.supabase.from('lovdata_documents').insert(rows);
+        const { data: insertedDocs, error: insertError } = await this.supabase
+          .from('lovdata_documents')
+          .insert(rows)
+          .select('id, archive_filename, member');
+
         batchTimer.end();
 
         if (insertError) {
@@ -197,10 +272,111 @@ export class SupabaseArchiveStore {
           );
           throw new Error(`Failed to insert documents batch ${i}-${i + batch.length}: ${insertError.message}`);
         }
+
+        // Store document IDs for chunk creation
+        if (insertedDocs) {
+          for (const doc of insertedDocs) {
+            const key = `${doc.archive_filename}:${doc.member}`;
+            documentIds.set(key, doc.id);
+          }
+        }
       }
 
+      // Step 5: Create and insert chunks for all documents
+      const chunkTimer = new Timer('create_and_insert_chunks', this.logs, { 
+        filename, 
+        documentCount: documents.length 
+      });
+      
+      let totalChunks = 0;
+      const chunkBatchSize = 200; // Insert chunks in batches
+      
+      for (let i = 0; i < documents.length; i += 50) { // Process documents in smaller batches for chunking
+        const docBatch = documents.slice(i, i + 50);
+        const allChunks: Array<{
+          document_id: number;
+          chunk_index: number;
+          content: string;
+          content_length: number;
+          start_char: number;
+          end_char: number;
+          archive_filename: string;
+          member: string;
+          document_title: string | null;
+          document_date: string | null;
+          section_title: string | null;
+          section_number: string | null;
+          embedding?: number[];
+        }> = [];
+
+        // Create chunks for each document
+        for (const doc of docBatch) {
+          const key = `${doc.archiveFilename}:${doc.member}`;
+          const documentId = documentIds.get(key);
+          
+          if (!documentId) {
+            this.logs.warn({ archive: doc.archiveFilename, member: doc.member }, 'Document ID not found, skipping chunk creation');
+            continue;
+          }
+
+          const chunks = this.chunker.chunkDocument(doc.content);
+          
+          for (const chunk of chunks) {
+            allChunks.push({
+              document_id: documentId,
+              chunk_index: chunk.chunkIndex,
+              content: chunk.content,
+              content_length: chunk.contentLength,
+              start_char: chunk.startChar,
+              end_char: chunk.endChar,
+              archive_filename: doc.archiveFilename,
+              member: doc.member,
+              document_title: doc.title,
+              document_date: doc.date,
+              section_title: chunk.metadata.sectionTitle ?? null,
+              section_number: chunk.metadata.sectionNumber ?? null
+            });
+          }
+        }
+
+        // Generate embeddings for chunks if embedding service is available
+        if (this.embeddingService && allChunks.length > 0) {
+          try {
+            const chunkTexts = allChunks.map(c => c.content);
+            const chunkEmbeddings = await this.embeddingService.generateEmbeddings(chunkTexts);
+            
+            for (let j = 0; j < allChunks.length && j < chunkEmbeddings.length; j++) {
+              allChunks[j].embedding = chunkEmbeddings[j];
+            }
+          } catch (embeddingError) {
+            this.logs.warn({ err: embeddingError }, 'Failed to generate chunk embeddings, inserting chunks without embeddings');
+          }
+        }
+
+        // Insert chunks in batches
+        for (let j = 0; j < allChunks.length; j += chunkBatchSize) {
+          const chunkBatch = allChunks.slice(j, j + chunkBatchSize);
+          const { error: chunkInsertError } = await this.supabase
+            .from('document_chunks')
+            .insert(chunkBatch);
+
+          if (chunkInsertError) {
+            this.logs.error(
+              { err: chunkInsertError, archive: filename, chunkBatchStart: j },
+              'Failed to insert chunk batch'
+            );
+            // Continue with other chunks rather than failing completely
+          } else {
+            totalChunks += chunkBatch.length;
+          }
+        }
+      }
+
+      chunkTimer.end({ totalChunks });
+      this.logs.info({ archive: filename, documents: documents.length, chunks: totalChunks }, 'Created and inserted document chunks');
+
       this.logs.info({ archive: filename, documents: documents.length }, 'Replaced documents in Supabase');
-      replaceTimer.end({ success: true });
+      replaceTimer.end({ success: true, chunksCreated: totalChunks });
     } catch (error) {
       replaceTimer.end({ success: false });
       this.logs.error({ err: error, archive: filename }, 'Failed to replace documents - database may be inconsistent');
@@ -263,7 +439,8 @@ export class SupabaseArchiveStore {
       query: query.substring(0, 100),
       queryLength: query.length,
       limit: options.limit,
-      offset: options.offset
+      offset: options.offset,
+      useHybridSearch: this.embeddingService !== null
     });
 
     // Validate query
@@ -287,6 +464,21 @@ export class SupabaseArchiveStore {
     // Example: "lov:*" matches "lovdata", "lovgivning", etc.
     // Join with & (AND) for all terms must match
     const tsQuery = tokens.map(token => `${token}:*`).join(' & ');
+
+    // Generate query embedding if hybrid search is available
+    let queryEmbedding: number[] | null = null;
+    if (this.embeddingService) {
+      try {
+        const embeddingTimer = new Timer('generate_query_embedding', this.logs, { query: query.substring(0, 100) });
+        queryEmbedding = await this.embeddingService.generateEmbedding(query);
+        embeddingTimer.end({ embeddingLength: queryEmbedding.length });
+        this.logs.debug({ queryLength: query.length }, 'Generated query embedding for hybrid search');
+      } catch (embeddingError) {
+        // Log error but continue with FTS-only search
+        this.logs.warn({ err: embeddingError }, 'Failed to generate query embedding - falling back to FTS-only search');
+        queryEmbedding = null;
+      }
+    }
 
     // Single optimized query with count
     const queryTimer = new Timer('db_text_search', this.logs, { tsQuery, limit, offset });
@@ -313,25 +505,48 @@ export class SupabaseArchiveStore {
           offset
         }, 'searchAsync: building query chain');
         
-        console.log(`[SupabaseArchiveStore] Building RPC call for ts_rank ordered search...`);
-        // Use RPC function for relevance-ordered search with ts_rank
-        // This provides better results ordered by relevance instead of arbitrary id
-        // The RPC function should be: search_lovdata_documents(search_query, result_limit, result_offset)
-        const rpcFunctionName = 'search_lovdata_documents';
+        // Use hybrid search if embeddings are available, otherwise fall back to FTS-only
+        let rpcFunctionName: string;
+        let rpcParams: any;
         
-        // Build the search query for the RPC function
-        // The RPC function expects a tsquery string, so we pass the constructed tsQuery
-        const rpcParams = {
-          search_query: tsQuery,
-          result_limit: limit,
-          result_offset: offset
-        };
-        
-        this.logs.info({ 
-          rpcFunction: rpcFunctionName,
-          rpcParams,
-          tsQuery
-        }, 'searchAsync: calling RPC function for relevance-ordered search');
+        // Use chunk-based search for better granularity
+        if (queryEmbedding && this.embeddingService) {
+          // Use hybrid search on chunks with RRF (Reciprocal Rank Fusion)
+          rpcFunctionName = 'search_document_chunks_hybrid';
+          rpcParams = {
+            search_query: query,
+            query_embedding: queryEmbedding,  // Pass as array directly
+            result_limit: limit,
+            result_offset: offset,
+            rrf_k: 60  // RRF constant (typical value)
+          };
+          
+          this.logs.info({ 
+            rpcFunction: rpcFunctionName,
+            queryLength: query.length,
+            embeddingLength: queryEmbedding.length,
+            limit,
+            offset,
+            searchType: 'chunks'
+          }, 'searchAsync: using hybrid search on chunks (FTS + Vector) with RRF');
+        } else {
+          // Fall back to FTS-only search on chunks
+          // Note: We could create a search_document_chunks_fts function, but for now
+          // we'll use the document-level search as fallback
+          rpcFunctionName = 'search_lovdata_documents';
+          rpcParams = {
+            search_query: tsQuery,
+            result_limit: limit,
+            result_offset: offset
+          };
+          
+          this.logs.info({ 
+            rpcFunction: rpcFunctionName,
+            rpcParams,
+            tsQuery,
+            searchType: 'documents_fallback'
+          }, 'searchAsync: using FTS-only search on documents (chunk search not available)');
+        }
         
         // Add an additional timeout wrapper around the query itself
         // This ensures we catch hanging queries even if the outer Promise.race doesn't work
@@ -395,14 +610,32 @@ export class SupabaseArchiveStore {
               const total = countResult.count ?? 0;
               
               // Map RPC result to expected format
-              // RPC function returns: { archive_filename, member, title, document_date, content, rank }
-              const data = (rpcResult.data || []).map((row: any) => ({
-                archive_filename: row.archive_filename,
-                member: row.member,
-                title: row.title,
-                document_date: row.document_date,
-                content: row.content
-              }));
+              // Chunk search returns: { id, document_id, chunk_index, content, archive_filename, member, document_title, document_date, section_title, section_number, fts_rank, vector_distance, rrf_score }
+              // Document search returns: { archive_filename, member, title, document_date, content, rank }
+              const data = (rpcResult.data || []).map((row: any) => {
+                // If this is a chunk result, use chunk-specific fields
+                if (row.chunk_index !== undefined) {
+                  return {
+                    archive_filename: row.archive_filename,
+                    member: row.member,
+                    title: row.document_title || row.section_title || null, // Prefer section title if available
+                    document_date: row.document_date,
+                    content: row.content,
+                    chunk_index: row.chunk_index,
+                    section_title: row.section_title,
+                    section_number: row.section_number
+                  };
+                } else {
+                  // Document-level result (fallback)
+                  return {
+                    archive_filename: row.archive_filename,
+                    member: row.member,
+                    title: row.title,
+                    document_date: row.document_date,
+                    content: row.content
+                  };
+                }
+              });
               
               // Return result in the same format as the original query
               const result = {
@@ -666,15 +899,42 @@ export class SupabaseArchiveStore {
 
     // Generate snippets from content
     const snippetTimer = new Timer('generate_snippets', this.logs, { documentCount: data.length });
-    const hits: ArchiveSearchHit[] = data.map((doc: { archive_filename: string; member: string; title: string | null; document_date: string | null; content: string }) => {
-      const snippet = this.generateSnippet(doc.content, tokens, 150);
-      return {
-        filename: doc.archive_filename,
-        member: doc.member,
-        title: doc.title,
-        date: doc.document_date,
-        snippet
-      };
+    const hits: ArchiveSearchHit[] = data.map((doc: any) => {
+      // For chunks, use the chunk content directly (it's already a focused snippet)
+      // For full documents, generate a snippet
+      let snippet: string;
+      if (doc.chunk_index !== undefined) {
+        // Chunk result - use chunk content as snippet (truncate if needed)
+        snippet = doc.content.length > 300 
+          ? doc.content.substring(0, 297) + '...'
+          : doc.content;
+        
+        // Add section info to title if available
+        let displayTitle = doc.title;
+        if (doc.section_number) {
+          displayTitle = displayTitle 
+            ? `${displayTitle} (${doc.section_number})`
+            : `§ ${doc.section_number}`;
+        }
+        
+        return {
+          filename: doc.archive_filename,
+          member: doc.member,
+          title: displayTitle,
+          date: doc.document_date,
+          snippet
+        };
+      } else {
+        // Document-level result - generate snippet
+        snippet = this.generateSnippet(doc.content, tokens, 150);
+        return {
+          filename: doc.archive_filename,
+          member: doc.member,
+          title: doc.title,
+          date: doc.document_date,
+          snippet
+        };
+      }
     });
     snippetTimer.end({ snippetCount: hits.length });
 

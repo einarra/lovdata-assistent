@@ -17,6 +17,8 @@
     "create-supabase-users": "tsx scripts/createSupabaseUsers.ts",
     "verify-supabase-migration": "tsx scripts/verifySupabaseMigration.ts",
     "sync-archives": "tsx scripts/syncArchives.ts",
+    "backfill-embeddings": "NODE_ENV=development tsx scripts/backfillEmbeddings.ts",
+    "chunk-documents": "NODE_ENV=development tsx scripts/chunkDocuments.ts",
     "lint": "eslint --ext .ts src",
     "test": "vitest run"
   },
