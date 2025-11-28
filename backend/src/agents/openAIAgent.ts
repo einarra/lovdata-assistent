@@ -36,7 +36,8 @@ export class OpenAIAgent implements Agent {
     // Add timeout at the client level as a fallback
     this.client = new OpenAI({ 
       apiKey: env.OPENAI_API_KEY,
-      timeout: 60000, // 60 seconds client-level timeout (matches our Promise.race max timeout of 55s, with small buffer)
+      // Don't set client-level timeout - we handle timeouts with Promise.race
+      // Setting a client timeout can interfere with our custom timeout logic
       maxRetries: 0 // Disable retries to avoid delays
     });
     this.model = options.model ?? env.OPENAI_MODEL;
@@ -176,6 +177,11 @@ export class OpenAIAgent implements Agent {
         apiCallPromise.then(result => {
           const elapsed = Date.now() - startTime;
           console.log(`[OpenAIAgent] API call promise resolved first after ${elapsed}ms`);
+          // Clear timeout since we succeeded
+          if (timeoutId) {
+            clearTimeout(timeoutId);
+            timeoutId = null;
+          }
           return result;
         }),
         timeoutPromise.catch(error => {
@@ -201,13 +207,21 @@ export class OpenAIAgent implements Agent {
       } catch (raceError) {
         const elapsed = Date.now() - startTime;
         console.log(`[OpenAIAgent] racePromise rejected after ${elapsed}ms:`, raceError instanceof Error ? raceError.message : String(raceError));
+        // Clear timeout on error too
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          timeoutId = null;
+        }
         throw raceError;
+      } finally {
+        // Clear all timeouts and intervals
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
+        clearInterval(progressCheckInterval);
+        specificChecks.forEach(clearTimeout);
+        console.log(`[OpenAIAgent] Progress checks cleared`);
       }
-      
-      // Clear all timeouts and intervals
-      clearInterval(progressCheckInterval);
-      specificChecks.forEach(clearTimeout);
-      console.log(`[OpenAIAgent] Progress checks cleared`);
       
       const elapsed = Date.now() - startTime;
       console.log(`[OpenAIAgent] API call completed after ${elapsed}ms`);
