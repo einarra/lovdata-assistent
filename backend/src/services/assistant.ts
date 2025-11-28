@@ -89,8 +89,8 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
       logger.info('runAssistant: calling skill.searchPublicData');
       let skillOutput: any;
       try {
-        // Add overall timeout for the entire skill execution (25 seconds)
-        const skillTimeoutMs = 25000;
+        // Add overall timeout for the entire skill execution (55 seconds - leaves 5s buffer for Vercel Pro 60s limit)
+        const skillTimeoutMs = 55000;
         const skillTimeoutPromise = new Promise<never>((_, reject) => {
           setTimeout(() => {
             reject(new Error(`Skill execution timed out after ${skillTimeoutMs}ms`));
@@ -348,7 +348,7 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
       if (agent && evidenceWithUpdatedLinks.length > 0) {
         // Check time before hydrating evidence - this can be slow
         const timeBeforeHydration = performance.now() - started;
-        const maxTimeForHydration = 6000; // 6 seconds - allows 4s for hydration before 10s Vercel limit
+        const maxTimeForHydration = 50000; // 50 seconds - allows 10s for hydration before 60s Vercel Pro limit
         
         if (timeBeforeHydration > maxTimeForHydration) {
           logger.warn({ 
@@ -384,13 +384,9 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
           }, 'runAssistant: calling OpenAI agent');
           
           // Check if we've already used too much time - if so, skip OpenAI and use fallback
-          // Vercel Pro has 60s timeout, Hobby has 10s timeout
-          // OpenAI call timeout is 5s, so we need at least 5-6s remaining
-          // For Hobby tier (10s): allow OpenAI if we've used < 4s (leaves 5s for OpenAI + 1s buffer)
-          // For Pro tier (60s): allow OpenAI if we've used < 50s (leaves 10s for OpenAI + buffer)
-          // Default to conservative Hobby tier limits for safety
+          // Vercel Pro has 60s timeout - allow OpenAI if we've used < 50s (leaves 10s for OpenAI + buffer)
           const timeUsedSoFar = performance.now() - started;
-          const maxTimeForOpenAI = 4000; // 4 seconds - allows OpenAI call (5s) with 1s buffer before 10s limit
+          const maxTimeForOpenAI = 50000; // 50 seconds - allows OpenAI call (5s) with 5s buffer before 60s limit
           
           if (timeUsedSoFar > maxTimeForOpenAI) {
             logger.warn({ 
@@ -400,7 +396,7 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
             }, 'runAssistant: skipping OpenAI call - too much time already used, using fallback');
             // Skip OpenAI call and use fallback (agentOutput will remain undefined)
           } else {
-            const estimatedTimeRemaining = 10000 - timeUsedSoFar; // Assume Hobby tier 10s limit for safety
+            const estimatedTimeRemaining = 60000 - timeUsedSoFar; // Vercel Pro 60s limit
             logger.info({ 
               timeUsedSoFar: Math.round(timeUsedSoFar),
               estimatedTimeRemaining: Math.round(estimatedTimeRemaining),
@@ -560,8 +556,8 @@ async function updateLinksForHtmlContent(evidence: AgentEvidence[], services: Se
   const documentFetchTimeoutMs = 5000;
   const overallStartTime = Date.now();
   
-  // Add overall timeout for all document fetches (30 seconds max for all items)
-  const overallTimeoutMs = 30000;
+  // Add overall timeout for all document fetches (50 seconds max for all items - leaves buffer for Vercel Pro 60s limit)
+  const overallTimeoutMs = 50000;
   const overallTimeoutPromise = new Promise<never>((_, reject) => {
     setTimeout(() => {
       const elapsed = Date.now() - overallStartTime;
@@ -661,9 +657,9 @@ async function updateLinksForHtmlContent(evidence: AgentEvidence[], services: Se
   );
   
   // Race between Promise.allSettled and overall timeout
-  // Reduce overall timeout to 8 seconds to avoid Vercel timeout (10s for Hobby, 60s for Pro)
+  // Use 50 seconds to avoid Vercel Pro timeout (60s limit)
   // This gives us time to complete before Vercel kills the function
-  const reducedTimeoutMs = Math.min(overallTimeoutMs, 8000);
+  const reducedTimeoutMs = Math.min(overallTimeoutMs, 50000);
   const reducedTimeoutPromise = new Promise<never>((_, reject) => {
     setTimeout(() => {
       const elapsed = Date.now() - overallStartTime;
@@ -727,7 +723,7 @@ async function hydrateEvidenceContent(evidence: AgentEvidence[], services: Servi
 
   const contentCache = new Map<string, string>();
   const hydrationStartTime = Date.now();
-  const hydrationTimeoutMs = 4000; // 4 seconds max for hydration to avoid Vercel timeout
+  const hydrationTimeoutMs = 10000; // 10 seconds max for hydration - Vercel Pro allows 60s total
   
   logger.info({ 
     hasArchive: !!archiveStore,

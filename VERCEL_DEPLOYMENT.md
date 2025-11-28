@@ -148,17 +148,19 @@ The React frontend is built and served as static files:
    - Verify `NODE_ENV=production` is set
 
 3. **Cold start timeouts:**
-   - Increase function timeout in `vercel.json` (max 60s on Hobby plan)
-   - Consider upgrading to Pro plan for longer timeouts
-   - Optimize initialization code in `backend/src/serverless.ts`
+   - Function timeout is set to 60s in `vercel.json` (Vercel Pro plan)
+   - Optimize initialization code in `backend/src/serverless.ts` if cold starts are slow
 
 4. **Function execution timeouts:**
-   - **Hobby plan:** 10 seconds maximum execution time
-   - **Pro plan:** 60 seconds (as configured in `vercel.json`)
+   - **Pro plan:** 60 seconds maximum execution time (as configured in `vercel.json`)
    - The code includes timeout checks to skip expensive operations (OpenAI, evidence hydration) if running low on time
+   - Timeouts are configured to leave buffers:
+     - Skill execution: 55s timeout (5s buffer)
+     - OpenAI calls: Allowed if < 50s used (10s buffer)
+     - Evidence hydration: Allowed if < 50s used (10s buffer)
+     - Search queries: 30s timeout (30s buffer for other operations)
    - If you see logs cutting off mid-execution, the function likely hit Vercel's timeout limit
    - Check Vercel logs for timeout errors
-   - Consider upgrading to Pro plan if you need longer execution times
 
 5. **Deprecation warnings:**
    - You may see `[DEP0169] DeprecationWarning: url.parse()` warnings in logs
@@ -188,9 +190,9 @@ The React frontend is built and served as static files:
 2. **Function Memory:** Set to 1024MB in `vercel.json` for better performance
    - Can be increased if needed (up to 3008MB on Pro plan)
 
-3. **Function Timeout:** Set to 60s (maximum on Hobby plan)
-   - Increase if you have long-running operations
-   - Consider breaking up long operations into smaller chunks
+3. **Function Timeout:** Set to 60s (Vercel Pro plan maximum)
+   - All timeouts are configured to work within this limit
+   - Long-running operations are broken into smaller chunks with appropriate timeouts
 
 ## Monitoring
 

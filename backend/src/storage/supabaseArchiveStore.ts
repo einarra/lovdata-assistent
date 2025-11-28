@@ -550,8 +550,8 @@ export class SupabaseArchiveStore {
         
         // Add an additional timeout wrapper around the query itself
         // This ensures we catch hanging queries even if the outer Promise.race doesn't work
-        // Use 3 seconds - very aggressive to trigger before Vercel kills the function
-        const queryTimeoutMs = 3000; // 3 seconds for the query itself - very aggressive timeout
+        // Use 30 seconds - reasonable timeout that leaves buffer for Vercel Pro 60s limit
+        const queryTimeoutMs = 30000; // 30 seconds for the query itself - leaves 30s buffer for other operations
         let queryTimeoutHandle: NodeJS.Timeout | null = null;
         
         // Add safety checks to ensure we're still running

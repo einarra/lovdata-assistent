@@ -63,11 +63,11 @@ export class OpenAIAgent implements Agent {
 
     // Add timeout to prevent hanging
     // We've typically used 2-3 seconds so far (database + Serper + evidence)
-    // Vercel Pro has 60s timeout, Hobby has 10s timeout
+    // Vercel Pro has 60s timeout
     // OpenAI API calls typically take 3-5 seconds, especially with large prompts
     // Use 5 seconds for OpenAI call - this allows enough time for the API while still leaving buffer
-    // Total function time: ~2.7s (current) + 5s (OpenAI) = ~7.7s, well under 10s limit
-    const timeoutMs = 5000; // 5 seconds - allows OpenAI API to complete while leaving buffer before Vercel timeout
+    // Total function time: ~2.7s (current) + 5s (OpenAI) = ~7.7s, well under 60s limit
+    const timeoutMs = 5000; // 5 seconds - allows OpenAI API to complete while leaving buffer before Vercel Pro 60s timeout
     const startTime = Date.now();
     const controller = new AbortController();
 
