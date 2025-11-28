@@ -554,18 +554,22 @@ export class SupabaseArchiveStore {
         const queryTimeoutMs = 30000; // 30 seconds for the query itself - leaves 30s buffer for other operations
         let queryTimeoutHandle: NodeJS.Timeout | null = null;
         
-        // Add safety checks to ensure we're still running
-        setTimeout(() => {
+        // Add safety checks to ensure we're still running (store references to clear them later)
+        const safetyCheckTimeouts: NodeJS.Timeout[] = [];
+        
+        const safetyCheck2s = setTimeout(() => {
           const elapsed = Date.now() - queryStartTime;
           console.log(`[SupabaseArchiveStore] 2 second safety check - elapsed: ${elapsed}ms (timeout should trigger at ${queryTimeoutMs}ms)`);
           this.logs.info({ elapsedMs: elapsed, queryTimeoutMs }, 'searchAsync: 2 second safety check - still running, timeout pending');
         }, 2000);
+        safetyCheckTimeouts.push(safetyCheck2s);
         
-        setTimeout(() => {
+        const safetyCheck28s = setTimeout(() => {
           const elapsed = Date.now() - queryStartTime;
           console.log(`[SupabaseArchiveStore] 2.8 second safety check - elapsed: ${elapsed}ms (timeout will trigger in ~200ms at ${queryTimeoutMs}ms)`);
           this.logs.info({ elapsedMs: elapsed, queryTimeoutMs }, 'searchAsync: 2.8 second safety check - timeout about to trigger');
         }, 2800);
+        safetyCheckTimeouts.push(safetyCheck28s);
         
         try {
           this.logs.info({ queryTimeoutMs, queryStartTime }, 'searchAsync: awaiting RPC query with internal timeout');
@@ -666,11 +670,12 @@ export class SupabaseArchiveStore {
           const internalRaceStartTime = Date.now();
           
           // Log right before timeout to confirm it's about to trigger
-          setTimeout(() => {
+          const safetyCheck29s = setTimeout(() => {
             const elapsed = Date.now() - queryStartTime;
             console.log(`[SupabaseArchiveStore] 2.9 second check - elapsed: ${elapsed}ms (timeout will trigger in ~100ms at ${queryTimeoutMs}ms)`);
             this.logs.info({ elapsedMs: elapsed, queryTimeoutMs }, 'searchAsync: 2.9 second check - timeout about to trigger');
           }, 2900);
+          safetyCheckTimeouts.push(safetyCheck29s);
           
           // Create a timeout promise that resolves (not rejects) to make Promise.race work properly
           const timeoutWrapperPromise = new Promise<{ type: 'timeout'; error: Error }>((resolve) => {
@@ -714,9 +719,11 @@ export class SupabaseArchiveStore {
           console.log(`[SupabaseArchiveStore] Internal race resolved with success, result has data: ${!!internalRaceResult.result?.data}`);
           const result = internalRaceResult.result;
           
+          // Clear all timeouts when query completes
           if (queryTimeoutHandle) {
             clearTimeout(queryTimeoutHandle);
           }
+          safetyCheckTimeouts.forEach(timeout => clearTimeout(timeout));
           
           const queryDuration = Date.now() - queryStartTime;
           this.logs.info({ queryDurationMs: queryDuration }, 'searchAsync: RPC query promise resolved');
@@ -780,24 +787,30 @@ export class SupabaseArchiveStore {
         this.logs.info({ elapsedMs: elapsed, timeoutMs, progress: `${Math.round((elapsed / timeoutMs) * 100)}%` }, 'searchAsync: still waiting for query (progress check)');
       }, 5000);
       
+      // Store references to all safety check timeouts for cleanup
+      const outerSafetyCheckTimeouts: NodeJS.Timeout[] = [];
+      
       // Also log after 1, 3, and 5 seconds to track progress
-      setTimeout(() => {
+      const safetyCheck1s = setTimeout(() => {
         const elapsed = Date.now() - queryStartTime;
         console.log(`[SupabaseArchiveStore] 1 second check - elapsed: ${elapsed}ms`);
         this.logs.info({ elapsedMs: elapsed }, 'searchAsync: 1 second check - function still running');
       }, 1000);
+      outerSafetyCheckTimeouts.push(safetyCheck1s);
       
-      setTimeout(() => {
+      const safetyCheck3s = setTimeout(() => {
         const elapsed = Date.now() - queryStartTime;
         console.log(`[SupabaseArchiveStore] 3 second check - elapsed: ${elapsed}ms`);
         this.logs.info({ elapsedMs: elapsed }, 'searchAsync: 3 second check - function still running');
       }, 3000);
+      outerSafetyCheckTimeouts.push(safetyCheck3s);
       
-      setTimeout(() => {
+      const safetyCheck5s = setTimeout(() => {
         const elapsed = Date.now() - queryStartTime;
         console.log(`[SupabaseArchiveStore] 5 second check - elapsed: ${elapsed}ms`);
         this.logs.info({ elapsedMs: elapsed }, 'searchAsync: 5 second check - function still running');
       }, 5000);
+      outerSafetyCheckTimeouts.push(safetyCheck5s);
       
       this.logs.info('searchAsync: progress interval and timed checks set up');
       
@@ -821,7 +834,9 @@ export class SupabaseArchiveStore {
       console.log(`[SupabaseArchiveStore] Awaiting Promise.race result...`);
       const raceResult = await racePromise;
       console.log(`[SupabaseArchiveStore] Promise.race completed, result type: ${raceResult.type}`);
+      // Clear all timeouts and intervals when query completes
       clearInterval(progressInterval);
+      outerSafetyCheckTimeouts.forEach(timeout => clearTimeout(timeout));
       this.logs.info({ resultType: raceResult.type }, 'searchAsync: Promise.race completed, cleaning up interval');
       
       if (timeoutHandle) {
@@ -849,8 +864,15 @@ export class SupabaseArchiveStore {
       count = result.count;
     } catch (timeoutError) {
       const elapsed = Date.now() - queryStartTime;
+      // Clear all timeouts and intervals on error
       if (timeoutHandle) {
         clearTimeout(timeoutHandle);
+      }
+      if (typeof progressInterval !== 'undefined') {
+        clearInterval(progressInterval);
+      }
+      if (typeof outerSafetyCheckTimeouts !== 'undefined') {
+        outerSafetyCheckTimeouts.forEach(timeout => clearTimeout(timeout));
       }
       this.logs.error({ 
         err: timeoutError, 
