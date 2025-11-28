@@ -55,19 +55,23 @@ export class OpenAIAgent implements Agent {
       }, 'OpenAIAgent.generate: model name not in known valid list - this may cause the API to hang or fail. Common valid models: gpt-4o-mini, gpt-4o, gpt-4-turbo');
     }
     
+    // Calculate adaptive timeout based on prompt size
+    // Larger prompts take longer to process
+    // Base timeout: 5 seconds for small prompts
+    // Add 1 second per 10KB of prompt (up to 15 seconds max)
+    const promptSizeKB = prompt.length / 1024;
+    const baseTimeout = 5000; // 5 seconds base
+    const additionalTimeout = Math.min(promptSizeKB * 100, 10000); // 1s per 10KB, max 10s additional
+    const timeoutMs = Math.min(baseTimeout + additionalTimeout, 15000); // Max 15 seconds
+    
     logger.info({ 
       question: input.question,
       evidenceCount: input.evidence.length,
-      model: this.model
+      model: this.model,
+      promptLength: prompt.length,
+      promptSizeKB: Math.round(promptSizeKB * 10) / 10,
+      timeoutMs
     }, 'OpenAIAgent.generate: starting API call');
-
-    // Add timeout to prevent hanging
-    // We've typically used 2-3 seconds so far (database + Serper + evidence)
-    // Vercel Pro has 60s timeout
-    // OpenAI API calls typically take 3-5 seconds, especially with large prompts
-    // Use 5 seconds for OpenAI call - this allows enough time for the API while still leaving buffer
-    // Total function time: ~2.7s (current) + 5s (OpenAI) = ~7.7s, well under 60s limit
-    const timeoutMs = 5000; // 5 seconds - allows OpenAI API to complete while leaving buffer before Vercel Pro 60s timeout
     const startTime = Date.now();
     const controller = new AbortController();
 
@@ -284,13 +288,44 @@ export class OpenAIAgent implements Agent {
   }
 }
 
+// Maximum content length per evidence item (characters)
+const MAX_CONTENT_PER_EVIDENCE = 3000; // ~3KB per evidence item
+// Maximum total prompt length (characters) - leave room for question and formatting
+const MAX_TOTAL_PROMPT_LENGTH = 50000; // ~50KB total prompt
+
+function truncateEvidenceContent(content: string | null | undefined, maxLength: number): string | undefined {
+  if (!content) {
+    return undefined;
+  }
+  if (content.length <= maxLength) {
+    return content;
+  }
+  // Truncate to maxLength, keeping beginning and end
+  const headLimit = Math.max(maxLength - 500, 0);
+  const head = headLimit > 0 ? content.slice(0, headLimit).trimEnd() : '';
+  const tail = content.slice(-500).trimStart();
+  if (!head) {
+    return tail;
+  }
+  return `${head}\n... [innhold forkortet] ...\n${tail}`;
+}
+
 function buildUserPrompt(question: string, evidence: AgentEvidence[]): string {
   if (evidence.length === 0) {
     return `Brukerspørsmål: ${question}\n\nIngen kilder ble funnet. Gi et forsiktig svar eller foreslå videre søk.`;
   }
 
+  // Calculate available space for evidence (subtract question and formatting overhead)
+  const questionAndOverhead = question.length + 200; // Question + formatting text
+  const availableForEvidence = Math.max(MAX_TOTAL_PROMPT_LENGTH - questionAndOverhead, 10000); // At least 10KB for evidence
+  const maxContentPerItem = Math.min(MAX_CONTENT_PER_EVIDENCE, Math.floor(availableForEvidence / evidence.length));
+
+  let totalLength = questionAndOverhead;
   const formattedEvidence = evidence
     .map(item => {
+      // Truncate content to prevent excessive prompt size
+      const truncatedContent = truncateEvidenceContent(item.content, maxContentPerItem);
+      
       const parts = [
         `ID: ${item.id}`,
         `Kilde: ${item.source}`,
@@ -298,13 +333,49 @@ function buildUserPrompt(question: string, evidence: AgentEvidence[]): string {
         item.date ? `Dato: ${item.date}` : undefined,
         item.link ? `Lenke: ${item.link}` : undefined,
         item.snippet ? `Utdrag: ${item.snippet}` : undefined,
-        item.content ? `Innhold:\n${item.content}` : undefined
+        truncatedContent ? `Innhold:\n${truncatedContent}` : undefined
       ].filter(Boolean);
-      return parts.join('\n');
+      
+      const formatted = parts.join('\n');
+      totalLength += formatted.length + 10; // +10 for separators
+      
+      return formatted;
     })
     .join('\n\n');
 
-  return `Brukerspørsmål: ${question}\n\nTilgjengelige kilder:\n${formattedEvidence}\n\nInstruksjoner: Besvar spørsmålet ved å bruke kildene. Husk å returnere JSON-formatet som spesifisert.`;
+  const prompt = `Brukerspørsmål: ${question}\n\nTilgjengelige kilder:\n${formattedEvidence}\n\nInstruksjoner: Besvar spørsmålet ved å bruke kildene. Husk å returnere JSON-formatet som spesifisert.`;
+  
+  // Final safety check - if prompt is still too long, truncate the entire evidence section
+  if (prompt.length > MAX_TOTAL_PROMPT_LENGTH) {
+    logger.warn({ 
+      promptLength: prompt.length, 
+      maxLength: MAX_TOTAL_PROMPT_LENGTH,
+      evidenceCount: evidence.length 
+    }, 'buildUserPrompt: prompt exceeded max length, applying additional truncation');
+    
+    const questionPart = `Brukerspørsmål: ${question}\n\nTilgjengelige kilder:\n`;
+    const instructionPart = `\n\nInstruksjoner: Besvar spørsmålet ved å bruke kildene. Husk å returnere JSON-formatet som spesifisert.`;
+    const availableForEvidenceTruncated = MAX_TOTAL_PROMPT_LENGTH - questionPart.length - instructionPart.length;
+    
+    // Truncate each evidence item more aggressively
+    const truncatedEvidence = evidence
+      .map(item => {
+        const veryTruncatedContent = truncateEvidenceContent(item.content, Math.floor(availableForEvidenceTruncated / evidence.length / 2));
+        const parts = [
+          `ID: ${item.id}`,
+          `Kilde: ${item.source}`,
+          item.title ? `Tittel: ${item.title}` : undefined,
+          item.snippet ? `Utdrag: ${item.snippet}` : undefined,
+          veryTruncatedContent ? `Innhold:\n${veryTruncatedContent}` : undefined
+        ].filter(Boolean);
+        return parts.join('\n');
+      })
+      .join('\n\n');
+    
+    return `${questionPart}${truncatedEvidence}${instructionPart}`;
+  }
+  
+  return prompt;
 }
 
 function parseAgentJson(raw: string): { answer?: string; citations?: AgentOutput['citations'] } {
