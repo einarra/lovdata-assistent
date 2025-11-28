@@ -101,10 +101,13 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
           hits.length < Math.min(pageSize, 5) ||
           totalHits === 0;
         if (shouldFetchFallback) {
-          const fallback = await services.serper.search(command.query, { num: 10 });
+          // Use document-targeted search to get direct links to Lovdata documents
+          const fallback = await services.serper.searchDocuments(command.query, { num: 10 });
+          // Prioritize document links in results
+          const prioritized = SerperClient.prioritizeDocumentLinks(fallback);
           fallbackInfo = {
             provider: 'serper',
-            organic: (fallback.organic ?? []).map(item => ({
+            organic: (prioritized.organic ?? []).map(item => ({
               title: item.title ?? null,
               link: item.link ?? null,
               snippet: item.snippet ?? null,

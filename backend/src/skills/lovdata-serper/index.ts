@@ -10,6 +10,7 @@ type SerperSkillInput = {
   site?: string;
   gl?: string;
   hl?: string;
+  targetDocuments?: boolean; // If true, prioritize document pages
 };
 
 type Services = {
@@ -54,20 +55,86 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
     };
   }
 
-  logger.info({ query: input.query, site }, 'lovdata-serper: calling client.search');
+  logger.info({ query: input.query, site, targetDocuments: input.targetDocuments }, 'lovdata-serper: calling client.search');
   
   let response;
   try {
-    response = await client.search(input.query, {
-      num: input.num,
-      gl: input.gl,
-      hl: input.hl,
-      site
-    });
-    logger.info({ 
-      hasOrganic: !!response.organic,
-      organicCount: Array.isArray(response.organic) ? response.organic.length : 0
-    }, 'lovdata-serper: client.search completed');
+    // Use document-targeted search if requested, or default to true for lovdata.no
+    const shouldTargetDocuments = input.targetDocuments ?? (site === 'lovdata.no' || site?.includes('lovdata.no'));
+    
+    if (shouldTargetDocuments) {
+      // Try document-specific search first
+      response = await client.searchDocuments(input.query, {
+        num: input.num,
+        gl: input.gl,
+        hl: input.hl,
+        site
+      });
+      logger.info({ 
+        hasOrganic: !!response.organic,
+        organicCount: Array.isArray(response.organic) ? response.organic.length : 0
+      }, 'lovdata-serper: client.searchDocuments completed');
+      
+      // If we got few results, also try a general search and merge
+      if (!response.organic || response.organic.length < 3) {
+        logger.info('lovdata-serper: document search returned few results, trying general search');
+        try {
+          const generalResponse = await client.search(input.query, {
+            num: Math.max(5, (input.num ?? 10) - (response.organic?.length ?? 0)),
+            gl: input.gl,
+            hl: input.hl,
+            site
+          });
+          
+          // Merge results, prioritizing document links
+          const documentResults = response.organic ?? [];
+          const generalResults = generalResponse.organic ?? [];
+          
+          // Combine and deduplicate
+          const seenLinks = new Set<string>();
+          const combined: typeof response.organic = [];
+          
+          // Add document results first
+          for (const item of documentResults) {
+            if (item.link && !seenLinks.has(item.link)) {
+              seenLinks.add(item.link);
+              combined.push(item);
+            }
+          }
+          
+          // Add general results that aren't duplicates
+          for (const item of generalResults) {
+            if (item.link && !seenLinks.has(item.link)) {
+              seenLinks.add(item.link);
+              combined.push(item);
+            }
+          }
+          
+          response = { ...response, organic: combined };
+          logger.info({ 
+            documentCount: documentResults.length,
+            generalCount: generalResults.length,
+            combinedCount: combined.length
+          }, 'lovdata-serper: merged document and general search results');
+        } catch (generalError) {
+          logger.warn({ err: generalError }, 'lovdata-serper: general search fallback failed, using document results only');
+        }
+      }
+    } else {
+      response = await client.search(input.query, {
+        num: input.num,
+        gl: input.gl,
+        hl: input.hl,
+        site
+      });
+      logger.info({ 
+        hasOrganic: !!response.organic,
+        organicCount: Array.isArray(response.organic) ? response.organic.length : 0
+      }, 'lovdata-serper: client.search completed');
+    }
+    
+    // Prioritize document links in results
+    response = SerperClient.prioritizeDocumentLinks(response);
   } catch (searchError) {
     logger.error({ 
       err: searchError,
@@ -80,7 +147,8 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
     title: item.title ?? null,
     link: item.link ?? null,
     snippet: item.snippet ?? null,
-    date: item.date ?? null
+    date: item.date ?? null,
+    isDocument: SerperClient.isDocumentLink(item.link) // Add flag to indicate if it's a document link
   }));
 
   logger.info({ organicCount: organic.length }, 'lovdata-serper: processing results');
@@ -115,7 +183,8 @@ function normalizeInput(input: unknown): SerperSkillInput {
       num: candidate.num,
       site: candidate.site,
       gl: candidate.gl,
-      hl: candidate.hl
+      hl: candidate.hl,
+      targetDocuments: candidate.targetDocuments
     };
   }
 

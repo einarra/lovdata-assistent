@@ -5,6 +5,7 @@ export type SerperSearchOptions = {
   gl?: string;
   hl?: string;
   site?: string;
+  targetDocuments?: boolean; // If true, prioritize document pages (lov, forskrift, dokument)
 };
 
 export type SerperResponse = {
@@ -37,7 +38,19 @@ export class SerperClient {
     let siteQuery = '';
     if (options.site) {
       const normalizedSite = options.site.replace(/^https?:\/\//, '').replace(/\/$/, '');
-      siteQuery = `site:${normalizedSite} `;
+      
+      // If targeting documents, use URL patterns to prioritize document pages
+      if (options.targetDocuments) {
+        // Target common Lovdata document URL patterns:
+        // - /dokument/ (document pages)
+        // - /lov/ (laws)
+        // - /forskrift/ (regulations)
+        // - /rundskriv/ (circulars)
+        // - /vedtak/ (decisions)
+        siteQuery = `site:${normalizedSite} (inurl:/dokument/ OR inurl:/lov/ OR inurl:/forskrift/ OR inurl:/rundskriv/ OR inurl:/vedtak/) `;
+      } else {
+        siteQuery = `site:${normalizedSite} `;
+      }
     }
     
     const payload = {
@@ -147,5 +160,57 @@ export class SerperClient {
       console.log(`[SerperClient] Re-throwing error`);
       throw error;
     }
+  }
+
+  /**
+   * Search specifically for document pages on Lovdata.no
+   * This targets URLs containing /dokument/, /lov/, /forskrift/, etc.
+   */
+  async searchDocuments(query: string, options: Omit<SerperSearchOptions, 'targetDocuments'> = {}): Promise<SerperResponse> {
+    return this.search(query, { ...options, targetDocuments: true });
+  }
+
+  /**
+   * Check if a URL is a direct document link on Lovdata.no
+   */
+  static isDocumentLink(url: string | null | undefined): boolean {
+    if (!url) return false;
+    const documentPatterns = [
+      /\/dokument\//,
+      /\/lov\//,
+      /\/forskrift\//,
+      /\/rundskriv\//,
+      /\/vedtak\//,
+      /\/lovsamling\//,
+      /\/historikk\//,
+    ];
+    return documentPatterns.some(pattern => pattern.test(url));
+  }
+
+  /**
+   * Filter and prioritize document links in search results
+   */
+  static prioritizeDocumentLinks(results: SerperResponse): SerperResponse {
+    if (!results.organic || results.organic.length === 0) {
+      return results;
+    }
+
+    // Separate document links from other links
+    const documentLinks: typeof results.organic = [];
+    const otherLinks: typeof results.organic = [];
+
+    for (const item of results.organic) {
+      if (this.isDocumentLink(item.link)) {
+        documentLinks.push(item);
+      } else {
+        otherLinks.push(item);
+      }
+    }
+
+    // Return document links first, then other links
+    return {
+      ...results,
+      organic: [...documentLinks, ...otherLinks]
+    };
   }
 }
