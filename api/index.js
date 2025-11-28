@@ -76,8 +76,10 @@ async function initializeApp() {
 }
 
 // Explicitly configure Vercel function timeout (60 seconds for Pro plan)
+// Ensure this runs as a Node.js serverless function, not an edge function
 export const config = {
   maxDuration: 60, // 60 seconds - Vercel Pro plan maximum
+  runtime: 'nodejs20.x', // Explicitly use Node.js runtime (not edge)
 };
 
 // Export the handler for Vercel
@@ -223,17 +225,30 @@ export default async function handler(req, res) {
       };
       
       // Add timeout to detect if Express doesn't respond
+      // Use 65 seconds (longer than our 60s function timeout) to avoid false positives
+      // This should only trigger if Express truly hangs, not during normal long operations
       const timeout = setTimeout(() => {
         if (!responseEnded && !res.headersSent) {
+          console.error('[API] Express wrapper timeout - Express did not respond within 65 seconds', {
+            path: req.url,
+            method: req.method,
+            responseEnded,
+            headersSent: res.headersSent
+          });
           if (!res.headersSent) {
-            res.status(404).json({ error: 'Not found', path: req.url, method: req.method });
+            res.status(504).json({ 
+              error: 'Gateway Timeout', 
+              message: 'The server took too long to respond',
+              path: req.url, 
+              method: req.method 
+            });
           }
           if (!responseEnded) {
             responseEnded = true;
             resolve();
           }
         }
-      }, 5000);
+      }, 65000); // 65 seconds - longer than function timeout to avoid false positives
       
       // Ensure request has all properties Express expects
       if (!req.headers) {
