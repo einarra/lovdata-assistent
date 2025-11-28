@@ -79,7 +79,7 @@ async function initializeApp() {
 // Ensure this runs as a Node.js serverless function, not an edge function
 export const config = {
   maxDuration: 60, // 60 seconds - Vercel Pro plan maximum
-  runtime: 'nodejs20.x', // Explicitly use Node.js runtime (not edge)
+  runtime: 'nodejs', // Explicitly use Node.js runtime (not edge)
 };
 
 // Export the handler for Vercel

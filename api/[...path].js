@@ -7,7 +7,7 @@ import handler from './index.js';
 // Ensure this runs as a Node.js serverless function, not an edge function
 export const config = {
   maxDuration: 60, // 60 seconds - Vercel Pro plan maximum
-  runtime: 'nodejs20.x', // Explicitly use Node.js runtime (not edge)
+  runtime: 'nodejs', // Explicitly use Node.js runtime (not edge)
 };
 
 // Export handler that reconstructs the path from Vercel's path parameter
