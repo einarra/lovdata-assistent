@@ -3,6 +3,11 @@
 
 import handler from './index.js';
 
+// Explicitly configure Vercel function timeout (60 seconds for Pro plan)
+export const config = {
+  maxDuration: 60, // 60 seconds - Vercel Pro plan maximum
+};
+
 // Export handler that reconstructs the path from Vercel's path parameter
 export default async function catchAllHandler(req, res) {
   // Log EVERY request at the entry point - this is critical for debugging

@@ -193,9 +193,10 @@ export function createApp() {
       // Execute assistant run
       logger.info({ question: payload.question }, 'Assistant run: starting execution');
       
-      // Add a top-level timeout to ensure we always return a response (50 seconds max)
+      // Add a top-level timeout to ensure we always return a response (58 seconds max)
+      // Vercel Pro has 60s limit, so we use 58s to leave 2s buffer for response handling
       // This wraps the entire runAssistant call to prevent infinite hangs
-      const executionTimeoutMs = 50000;
+      const executionTimeoutMs = 58000;
       let executionTimeoutHandle: NodeJS.Timeout | null = null;
       const executionTimeoutPromise = new Promise<never>((_, reject) => {
         executionTimeoutHandle = setTimeout(() => {

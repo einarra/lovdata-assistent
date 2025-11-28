@@ -75,6 +75,11 @@ async function initializeApp() {
   return appInstance;
 }
 
+// Explicitly configure Vercel function timeout (60 seconds for Pro plan)
+export const config = {
+  maxDuration: 60, // 60 seconds - Vercel Pro plan maximum
+};
+
 // Export the handler for Vercel
 export default async function handler(req, res) {
   // Log EVERY request at the entry point to see what Vercel is sending

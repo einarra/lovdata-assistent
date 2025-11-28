@@ -4,6 +4,11 @@
 
 import mainHandler from '../index.js';
 
+// Explicitly configure Vercel function timeout (60 seconds for Pro plan)
+export const config = {
+  maxDuration: 60, // 60 seconds - Vercel Pro plan maximum
+};
+
 export default async function handler(req, res) {
   // Log that we're in the explicit route handler
   console.log('[API/assistant/run.js] Explicit route handler called:', {

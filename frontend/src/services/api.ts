@@ -203,7 +203,23 @@ class ApiService {
 
     let response: Response;
     try {
-      response = await fetch(url, requestOptions);
+      // Use AbortController for timeout (70 seconds - longer than backend timeout of 58s)
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 70000); // 70 seconds
+      
+      try {
+        response = await fetch(url, {
+          ...requestOptions,
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+      } catch (fetchError) {
+        clearTimeout(timeoutId);
+        if (fetchError instanceof Error && fetchError.name === 'AbortError') {
+          throw new Error('Request timed out after 70 seconds. The server may be processing a complex query. Please try again.');
+        }
+        throw fetchError;
+      }
       console.log('[Frontend] Received response:', {
         status: response.status,
         statusText: response.statusText,
