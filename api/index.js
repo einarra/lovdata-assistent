@@ -13,12 +13,12 @@ async function initializeApp() {
   if (appInstance) {
     return appInstance;
   }
-  
+
   if (initPromise) {
     await initPromise;
     return appInstance;
   }
-  
+
   initPromise = (async () => {
     try {
       // Initialize serverless backend (sets up archive store, etc.)
@@ -35,7 +35,7 @@ async function initializeApp() {
           console.error('Stack:', errorStack);
         }
       }
-      
+
       // Create the Express app after initialization (or even if it failed)
       try {
         const { createApp } = await import('../backend/dist/http/app.js');
@@ -70,7 +70,7 @@ async function initializeApp() {
       }
     }
   })();
-  
+
   await initPromise;
   return appInstance;
 }
@@ -84,20 +84,15 @@ export const config = {
 
 // Export the handler for Vercel
 export default async function handler(req, res) {
-  // Log EVERY request at the entry point to see what Vercel is sending
-  console.log('[API/index.js] Entry point:', {
-    method: req.method,
-    url: req.url,
-    path: req.path,
-    originalUrl: req.originalUrl,
-    query: req.query,
-    headers: {
-      'content-type': req.headers['content-type'],
-      'authorization': req.headers.authorization ? 'present' : 'missing',
-      'x-http-method-override': req.headers['x-http-method-override']
-    }
-  });
-  
+  // Only log request in development
+  if (process.env.NODE_ENV === 'development') {
+    console.log('[API/index.js] Entry point:', {
+      method: req.method,
+      url: req.url,
+      path: req.path
+    });
+  }
+
   // Quick health check that doesn't require backend initialization
   const path = (req.url || req.path || '/').replace(/^\/api/, '') || '/';
   if (path === '/health' && req.method === 'GET') {
@@ -107,7 +102,7 @@ export default async function handler(req, res) {
     } catch (error) {
       // Even if backend fails, return a basic health response
       if (!res.headersSent) {
-        res.status(503).json({ 
+        res.status(503).json({
           status: 'degraded',
           message: 'Backend not initialized',
           error: error instanceof Error ? error.message : String(error)
@@ -127,24 +122,24 @@ export default async function handler(req, res) {
       const errorMessage = initError instanceof Error ? initError.message : String(initError);
       console.error('App initialization failed:', errorMessage);
       if (!res.headersSent) {
-        res.status(500).json({ 
-          error: 'Backend initialization failed', 
+        res.status(500).json({
+          error: 'Backend initialization failed',
           message: errorMessage,
           hint: 'Check that backend/dist directory exists. Run "npm run build" in the backend directory.',
-          ...(process.env.NODE_ENV === 'development' && { 
-            stack: initError instanceof Error ? initError.stack : undefined 
+          ...(process.env.NODE_ENV === 'development' && {
+            stack: initError instanceof Error ? initError.stack : undefined
           })
         });
       }
       return;
     }
-    
+
     // Handle path reconstruction
     // Vercel routes /api/* to this function, but Express expects paths without /api
     // If called from catch-all handler, path is already set correctly
     // Otherwise, we need to reconstruct it
     let path = req.url || req.path || '/';
-    
+
     // Check if this came from the catch-all handler (has ...path in query)
     // The catch-all handler should have already set req.url, but check query as fallback
     if (req.query && (req.query['...path'] || req.query.path)) {
@@ -158,14 +153,14 @@ export default async function handler(req, res) {
       // Direct call to index.js with /api prefix - strip it
       path = path.replace(/^\/api/, '') || '/';
     }
-    
+
     // Update all path-related properties
     req.url = path;
     req.path = path;
     if (!req.originalUrl) {
       req.originalUrl = '/api' + path;
     }
-    
+
     // Debug logging in development and Vercel
     if (process.env.NODE_ENV === 'development' || process.env.VERCEL) {
       console.log('[API] Path reconstruction:', {
@@ -181,7 +176,7 @@ export default async function handler(req, res) {
         }
       });
     }
-    
+
     // Ensure request has all necessary properties for Express
     // Vercel's req/res should be compatible, but let's make sure
     // CRITICAL: Preserve the HTTP method - don't override if it's already set
@@ -201,17 +196,17 @@ export default async function handler(req, res) {
     if (!req.baseUrl) {
       req.baseUrl = '';
     }
-    
+
     // Vercel's req/res are compatible with Express
     // Use the Express app to handle the request
     return new Promise((resolve) => {
       let responseEnded = false;
-      
+
       // Save original method BEFORE setting up wrapper
       const originalEnd = res.end.bind(res);
-      
+
       // Override res.end to track completion - MUST be set before calling Express
-      res.end = function(...args) {
+      res.end = function (...args) {
         const result = originalEnd(...args);
         if (!responseEnded) {
           responseEnded = true;
@@ -223,7 +218,7 @@ export default async function handler(req, res) {
         }
         return result;
       };
-      
+
       // Add timeout to detect if Express doesn't respond
       // Use 65 seconds (longer than our 60s function timeout) to avoid false positives
       // This should only trigger if Express truly hangs, not during normal long operations
@@ -236,11 +231,11 @@ export default async function handler(req, res) {
             headersSent: res.headersSent
           });
           if (!res.headersSent) {
-            res.status(504).json({ 
-              error: 'Gateway Timeout', 
+            res.status(504).json({
+              error: 'Gateway Timeout',
               message: 'The server took too long to respond',
-              path: req.url, 
-              method: req.method 
+              path: req.url,
+              method: req.method
             });
           }
           if (!responseEnded) {
@@ -249,7 +244,7 @@ export default async function handler(req, res) {
           }
         }
       }, 65000); // 65 seconds - longer than function timeout to avoid false positives
-      
+
       // Ensure request has all properties Express expects
       if (!req.headers) {
         req.headers = {};
@@ -290,7 +285,7 @@ export default async function handler(req, res) {
       if (!req.params) {
         req.params = {};
       }
-      
+
       // Express expects certain properties on the request
       // Preserve the original method - don't override it
       if (!req.method) {
@@ -303,45 +298,30 @@ export default async function handler(req, res) {
       req.protocol = req.protocol || 'https';
       req.hostname = req.hostname || req.headers.host || 'localhost';
       req.ip = req.ip || req.headers['x-forwarded-for'] || '127.0.0.1';
-      
+
       // Set up response tracking before calling Express
       const checkExpressResponse = setInterval(() => {
         if (res.headersSent) {
           clearInterval(checkExpressResponse);
         }
       }, 10);
-      
+
       // Clear interval after timeout
       setTimeout(() => {
         clearInterval(checkExpressResponse);
       }, 1000);
-      
-      // Log before calling Express
-      console.log('[API/index.js] About to call Express app:', {
-        method: req.method,
-        url: req.url,
-        path: req.path,
-        originalUrl: req.originalUrl,
-        hasBody: !!req.body,
-        bodyType: typeof req.body,
-        bodyPreview: req.body && typeof req.body === 'object' ? JSON.stringify(req.body).substring(0, 200) : (typeof req.body === 'string' ? req.body.substring(0, 200) : 'none'),
-        contentType: req.headers['content-type'],
-        authorization: req.headers.authorization ? 'present' : 'missing'
-      });
-      
-      // Special logging for assistant/run
-      if (path === '/assistant/run') {
-        console.log('[API/index.js] Assistant run request - before Express:', {
+
+      // Log before calling Express only in development
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[API/index.js] About to call Express app:', {
           method: req.method,
-          path: req.path,
-          hasBody: !!req.body,
-          bodyKeys: req.body && typeof req.body === 'object' ? Object.keys(req.body) : [],
-          bodyPreview: req.body && typeof req.body === 'object' ? JSON.stringify(req.body).substring(0, 300) : (typeof req.body === 'string' ? req.body.substring(0, 300) : 'none'),
-          contentType: req.headers['content-type'],
-          authorization: req.headers.authorization ? 'present' : 'missing'
+          url: req.url,
+          path: req.path
         });
       }
-      
+
+
+
       try {
         app(req, res, (err) => {
           clearTimeout(timeout);
@@ -353,7 +333,7 @@ export default async function handler(req, res) {
               method: req.method,
               stack: err.stack
             });
-            
+
             // Special logging for assistant/run errors
             if (path === '/assistant/run') {
               console.error('[API/index.js] Assistant run error details:', {
@@ -364,11 +344,11 @@ export default async function handler(req, res) {
                 bodyType: typeof req.body
               });
             }
-            
+
             if (!res.headersSent) {
               const statusCode = err.statusCode || err.status || 500;
-              res.status(statusCode).json({ 
-                error: 'Internal server error', 
+              res.status(statusCode).json({
+                error: 'Internal server error',
                 message: err.message,
                 ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
               });
@@ -385,7 +365,7 @@ export default async function handler(req, res) {
               path: req.path,
               originalUrl: req.originalUrl
             });
-            
+
             // Special logging for assistant/run 404s
             if (path === '/assistant/run') {
               console.error('[API/index.js] Assistant run route not found - this should not happen!', {
@@ -398,10 +378,10 @@ export default async function handler(req, res) {
                 contentType: req.headers['content-type']
               });
             }
-            
-            const errorResponse = { 
-              error: 'Not found', 
-              path: req.url, 
+
+            const errorResponse = {
+              error: 'Not found',
+              path: req.url,
               method: req.method,
               originalUrl: req.originalUrl,
               reconstructedPath: req.path
@@ -423,15 +403,8 @@ export default async function handler(req, res) {
               resolve();
             }
           } else {
-            console.log('[API/index.js] Express sent response successfully:', {
-              method: req.method,
-              path: req.path,
-              statusCode: res.statusCode
-            });
-            
-            // Special logging for assistant/run success
-            if (path === '/assistant/run') {
-              console.log('[API/index.js] Assistant run response sent:', {
+            if (process.env.NODE_ENV === 'development') {
+              console.log('[API/index.js] Express sent response successfully:', {
                 method: req.method,
                 path: req.path,
                 statusCode: res.statusCode
@@ -449,7 +422,7 @@ export default async function handler(req, res) {
           path: req.path,
           method: req.method
         });
-        
+
         // Special logging for assistant/run exceptions
         if (path === '/assistant/run') {
           console.error('[API/index.js] Assistant run exception:', {
@@ -459,10 +432,10 @@ export default async function handler(req, res) {
             bodyType: typeof req.body
           });
         }
-        
+
         if (!res.headersSent) {
-          res.status(500).json({ 
-            error: 'Failed to process request', 
+          res.status(500).json({
+            error: 'Failed to process request',
             message: expressError.message,
             ...(process.env.NODE_ENV === 'development' && { stack: expressError.stack })
           });
@@ -475,8 +448,8 @@ export default async function handler(req, res) {
     });
   } catch (error) {
     if (!res.headersSent) {
-      res.status(500).json({ 
-        error: 'Failed to initialize server', 
+      res.status(500).json({
+        error: 'Failed to initialize server',
         message: error.message,
         stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
       });

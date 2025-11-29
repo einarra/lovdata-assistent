@@ -5,13 +5,13 @@ import { fileURLToPath } from 'url';
 import { existsSync } from 'fs';
 
 // Only write diagnostics in development or when DEBUG_ENV is set
-const isServerless = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.cwd().startsWith('/var/task');
-const shouldDiag = process.env.NODE_ENV === 'development' || process.env.DEBUG_ENV;
+const shouldDiag = process.env.NODE_ENV === 'development' || process.env.DEBUG_ENV === 'true';
 
 // Write diagnostics only when needed
 function writeDiag(msg: string) {
   if (shouldDiag) {
-    process.stderr.write(`[ENV] ${msg}\n`);
+    // Use console.log instead of stderr for better visibility in Vercel logs if needed
+    console.log(`[ENV] ${msg}`);
   }
 }
 
@@ -21,7 +21,7 @@ function findBackendRoot(): string {
   const __filename = fileURLToPath(import.meta.url);
   let currentDir = path.dirname(__filename);
   const startDir = currentDir;
-  
+
   // Walk up the directory tree to find package.json
   for (let i = 0; i < 10; i++) {
     const packageJsonPath = path.join(currentDir, 'package.json');
@@ -35,7 +35,7 @@ function findBackendRoot(): string {
     }
     currentDir = parent;
   }
-  
+
   // Fallback: assume backend is two levels up from src/config or dist/config
   return path.resolve(startDir, '../..');
 }
@@ -53,14 +53,23 @@ if (existsSync(cwdEnvPath)) {
   envPathToLoad = envPath;
 }
 
+// Capture NODE_ENV from process.env before loading .env
+// This ensures CLI arguments (e.g. NODE_ENV=development) take precedence over .env file
+const cliNodeEnv = process.env.NODE_ENV;
+
 // Load .env file if found, otherwise let dotenv search automatically
 // Use override: true to ensure .env values take precedence over existing process.env
 // In serverless (Vercel), .env files don't exist - env vars come from platform
-const result = envPathToLoad 
+const result = envPathToLoad
   ? dotenv.config({ path: envPathToLoad, override: true })
   : dotenv.config({ override: true });
 
-if (result.error && !isServerless && shouldDiag) {
+// Restore NODE_ENV if it was set in CLI
+if (cliNodeEnv) {
+  process.env.NODE_ENV = cliNodeEnv;
+}
+
+if (result.error && shouldDiag) {
   writeDiag(`Error loading .env: ${result.error.message}`);
 } else if (result.parsed && shouldDiag) {
   const keyCount = Object.keys(result.parsed).length;

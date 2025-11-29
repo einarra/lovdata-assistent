@@ -73,12 +73,12 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
       logger.info('runAssistant: getting orchestrator and services');
       const orchestrator = await getOrchestrator();
       const services = getServices();
-      logger.info({ 
+      logger.info({
         hasArchive: !!services.archive,
         hasLovdata: !!services.lovdata,
         hasSerper: !!services.serper
       }, 'runAssistant: services obtained');
-      
+
       const ctx = {
         now: new Date(),
         locale: options.locale,
@@ -96,7 +96,7 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
             reject(new Error(`Skill execution timed out after ${skillTimeoutMs}ms`));
           }, skillTimeoutMs);
         });
-        
+
         const skillExecutionPromise = withTrace(
           {
             name: 'skill.searchPublicData',
@@ -129,24 +129,20 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
               },
               ctx
             );
-            logger.info({ 
-              hasResult: !!result,
-              resultType: typeof result,
-              resultKeys: result && typeof result === 'object' ? Object.keys(result) : []
-            }, 'runAssistant: orchestrator.run completed');
+            // Reduced logging
             return result;
           }
         );
-        
+
         const traceResult = await Promise.race([skillExecutionPromise, skillTimeoutPromise]);
         skillOutput = traceResult;
         logger.info('runAssistant: skill.searchPublicData trace completed');
       } catch (skillError) {
-        logger.error({ 
+        logger.error({
           err: skillError,
           stack: skillError instanceof Error ? skillError.stack : undefined
         }, 'runAssistant: skill.searchPublicData failed');
-        
+
         // If skill execution fails or times out, continue with empty results
         // This allows the assistant to still provide a response
         logger.warn('runAssistant: continuing with empty results due to skill failure');
@@ -166,11 +162,11 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
           }
         };
       }
-      
+
       // skillOutput is { result: SkillOutput, runId: string } from withTrace
       // SkillOutput has { result: any, meta?: any }
       const skillOutputData = skillOutput.result;
-      logger.info({ 
+      logger.info({
         hasResult: !!skillOutputData,
         resultType: typeof skillOutputData,
         hasResultField: skillOutputData && typeof skillOutputData === 'object' && 'result' in skillOutputData,
@@ -179,11 +175,7 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
 
       // Extract the actual result from SkillOutput
       const result = (skillOutputData?.result ?? {}) as LovdataSkillSearchResult;
-      logger.info({ 
-        hasHits: Array.isArray(result.hits),
-        hitsCount: Array.isArray(result.hits) ? result.hits.length : 0,
-        resultKeys: result && typeof result === 'object' ? Object.keys(result) : []
-      }, 'runAssistant: processed skill result');
+      // Reduced logging
       let serperSkillMeta: Record<string, unknown> | undefined;
 
       const primaryHits = Array.isArray(result.hits) ? result.hits.length : 0;
@@ -223,8 +215,8 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
                 ctx
               )
           );
-          
-          logger.info({ 
+
+          logger.info({
             hasResult: !!serperSkillOutput,
             resultType: typeof serperSkillOutput
           }, 'runAssistant: Serper orchestrator.run completed');
@@ -294,7 +286,7 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
                 site: serperResult.site ?? null,
                 organicResults: organicResults.length
               } as Record<string, unknown>);
-            logger.info({ 
+            logger.info({
               organicResultsCount: organicResults.length,
               providerCombined
             }, 'runAssistant: Serper results processed');
@@ -316,12 +308,11 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
       logger.info('runAssistant: building evidence');
       const evidence = buildEvidence(result);
       logger.info({ evidenceCount: evidence.length }, 'runAssistant: evidence built');
-      
+
       // Always update links for HTML content, regardless of agent usage
-      logger.info('runAssistant: updating links for HTML content');
       const evidenceWithUpdatedLinks = await updateLinksForHtmlContent(evidence, services);
       logger.info({ updatedCount: evidenceWithUpdatedLinks.length }, 'runAssistant: links updated');
-      
+
       let agentEvidence: AgentEvidence[] = evidenceWithUpdatedLinks;
       const pagination = {
         page: result.page ?? page,
@@ -333,15 +324,15 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
       const combinedSkillMeta =
         skillOutput.meta || serperSkillMeta
           ? {
-              ...(skillOutput.meta ?? {}),
-              ...(serperSkillMeta ? { serper: serperSkillMeta } : {})
-            }
+            ...(skillOutput.meta ?? {}),
+            ...(serperSkillMeta ? { serper: serperSkillMeta } : {})
+          }
           : undefined;
 
       logger.info('runAssistant: getting agent');
       const agent = getAgent();
       logger.info({ hasAgent: !!agent }, 'runAssistant: agent obtained');
-      
+
       let agentOutput: AgentOutput | undefined;
       let usedAgent = false;
 
@@ -349,9 +340,9 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
         // Check time before hydrating evidence - this can be slow
         const timeBeforeHydration = performance.now() - started;
         const maxTimeForHydration = 50000; // 50 seconds - allows 10s for hydration before 60s Vercel Pro limit
-        
+
         if (timeBeforeHydration > maxTimeForHydration) {
-          logger.warn({ 
+          logger.warn({
             timeUsedSoFar: Math.round(timeBeforeHydration),
             maxTimeForHydration,
             evidenceCount: evidenceWithUpdatedLinks.length
@@ -362,7 +353,7 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
             content: null // No full content, just snippets
           })));
         } else {
-          logger.info({ 
+          logger.info({
             evidenceCount: evidenceWithUpdatedLinks.length,
             timeUsedSoFar: Math.round(timeBeforeHydration)
           }, 'runAssistant: hydrating evidence content for agent');
@@ -377,19 +368,19 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
             snippet: item.snippet
           }));
 
-          logger.info({ 
+          logger.info({
             question,
             evidenceCount: agentEvidence.length,
             sampleCount: traceEvidenceSample.length
           }, 'runAssistant: calling OpenAI agent');
-          
+
           // Check if we've already used too much time - if so, skip OpenAI and use fallback
           // Vercel Pro has 60s timeout - allow OpenAI if we've used < 50s (leaves 10s for OpenAI + buffer)
           const timeUsedSoFar = performance.now() - started;
           const maxTimeForOpenAI = 50000; // 50 seconds - allows OpenAI call (5s) with 5s buffer before 60s limit
-          
+
           if (timeUsedSoFar > maxTimeForOpenAI) {
-            logger.warn({ 
+            logger.warn({
               timeUsedSoFar: Math.round(timeUsedSoFar),
               maxTimeForOpenAI,
               estimatedTotal: Math.round(timeUsedSoFar + 5000) // Time if we add OpenAI call
@@ -397,34 +388,34 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
             // Skip OpenAI call and use fallback (agentOutput will remain undefined)
           } else {
             const estimatedTimeRemaining = 60000 - timeUsedSoFar; // Vercel Pro 60s limit
-            logger.info({ 
+            logger.info({
               timeUsedSoFar: Math.round(timeUsedSoFar),
               estimatedTimeRemaining: Math.round(estimatedTimeRemaining),
               maxTimeForOpenAI,
               estimatedTotalIfOpenAI: Math.round(timeUsedSoFar + 5000)
             }, 'runAssistant: proceeding with OpenAI call - time check passed');
             const agentCall = await withTrace<AgentOutput>(
-            {
-              name: 'agent.answer',
-              runType: 'llm',
-              inputs: {
-                question,
-                evidence: traceEvidenceSample
+              {
+                name: 'agent.answer',
+                runType: 'llm',
+                inputs: {
+                  question,
+                  evidence: traceEvidenceSample
+                },
+                tags: ['assistant', 'openai'],
+                getOutputs: (output: AgentOutput) => ({ answer: output.answer })
               },
-              tags: ['assistant', 'openai'],
-              getOutputs: (output: AgentOutput) => ({ answer: output.answer })
-            },
-            async () => {
-              logger.info('runAssistant: calling agent.generate');
-              const result = await agent.generate({ question, evidence: agentEvidence, locale: options.locale });
-              logger.info({ 
-                answerLength: result.answer.length,
-                citationsCount: result.citations.length,
-                model: result.model
-              }, 'runAssistant: agent.generate completed');
-              return result;
-            }
-          );
+              async () => {
+                logger.info('runAssistant: calling agent.generate');
+                const result = await agent.generate({ question, evidence: agentEvidence, locale: options.locale });
+                logger.info({
+                  answerLength: result.answer.length,
+                  citationsCount: result.citations.length,
+                  model: result.model
+                }, 'runAssistant: agent.generate completed');
+                return result;
+              }
+            );
 
             agentOutput = agentCall.result;
             usedAgent = true;
@@ -436,7 +427,7 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
       }
 
       logger.info({ usedAgent, hasAgentOutput: !!agentOutput }, 'runAssistant: building response');
-      
+
       let response: AssistantRunResponse;
       if (usedAgent && agentOutput) {
         logger.info('runAssistant: building response with agent output');
@@ -454,7 +445,7 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
             processingTimeMs: 0
           }
         };
-        logger.info({ 
+        logger.info({
           answerLength: response.answer.length,
           evidenceCount: response.evidence.length,
           citationsCount: response.citations.length
@@ -479,13 +470,13 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
             processingTimeMs: 0
           }
         };
-        logger.info({ 
+        logger.info({
           answerLength: response.answer.length,
           evidenceCount: response.evidence.length,
           citationsCount: response.citations.length
         }, 'runAssistant: fallback response built');
       }
-      
+
       logger.info('runAssistant: response prepared, returning');
 
       const pipelineResult: AssistantPipelineResult = {
@@ -539,7 +530,7 @@ function isHtmlContent(text: string): boolean {
 
 async function updateLinksForHtmlContent(evidence: AgentEvidence[], services: ServiceRegistry): Promise<AgentEvidence[]> {
   logger.info({ evidenceCount: evidence.length }, 'updateLinksForHtmlContent: starting');
-  
+
   const lovdataClient = services.lovdata;
   const archiveStore = services.archive ?? null;
   if (!lovdataClient && !archiveStore) {
@@ -547,7 +538,7 @@ async function updateLinksForHtmlContent(evidence: AgentEvidence[], services: Se
     return evidence;
   }
 
-  logger.info({ 
+  logger.info({
     hasArchive: !!archiveStore,
     hasLovdata: !!lovdataClient
   }, 'updateLinksForHtmlContent: processing evidence items');
@@ -555,27 +546,27 @@ async function updateLinksForHtmlContent(evidence: AgentEvidence[], services: Se
   // Add timeout for each document fetch (5 seconds per item)
   const documentFetchTimeoutMs = 5000;
   const overallStartTime = Date.now();
-  
+
   // Add overall timeout for all document fetches (50 seconds max for all items - leaves buffer for Vercel Pro 60s limit)
   const overallTimeoutMs = 50000;
   const overallTimeoutPromise = new Promise<never>((_, reject) => {
     setTimeout(() => {
       const elapsed = Date.now() - overallStartTime;
-      logger.error({ 
-        elapsedMs: elapsed, 
+      logger.error({
+        elapsedMs: elapsed,
         evidenceCount: evidence.length,
-        timeoutMs: overallTimeoutMs 
+        timeoutMs: overallTimeoutMs
       }, 'updateLinksForHtmlContent: overall timeout reached');
       reject(new Error(`updateLinksForHtmlContent timed out after ${overallTimeoutMs}ms`));
     }, overallTimeoutMs);
   });
-  
+
   // Use Promise.allSettled to ensure we get results even if some fetches fail
   // This prevents one slow fetch from blocking all results
   const updatePromise = Promise.allSettled(
     evidence.map(async (item, index) => {
       logger.debug({ index, evidenceId: item.id }, 'updateLinksForHtmlContent: processing item');
-      
+
       const metadata = item.metadata ?? {};
       const filename = typeof metadata.filename === 'string' ? metadata.filename : undefined;
       const member = typeof metadata.member === 'string' ? metadata.member : undefined;
@@ -593,7 +584,7 @@ async function updateLinksForHtmlContent(evidence: AgentEvidence[], services: Se
       try {
         // Check if content is HTML with timeout
         let fullText: string | null = null;
-        
+
         const fetchPromise = (async () => {
           if (archiveStore) {
             logger.debug({ filename, member }, 'updateLinksForHtmlContent: fetching from archive store');
@@ -606,18 +597,18 @@ async function updateLinksForHtmlContent(evidence: AgentEvidence[], services: Se
           }
           return null;
         })();
-        
+
         const timeoutPromise = new Promise<never>((_, reject) => {
           setTimeout(() => {
             reject(new Error(`Document fetch timed out after ${documentFetchTimeoutMs}ms for ${filename}/${member}`));
           }, documentFetchTimeoutMs);
         });
-        
+
         try {
           fullText = await Promise.race([fetchPromise, timeoutPromise]);
           logger.debug({ filename, member, hasText: !!fullText, textLength: fullText?.length ?? 0 }, 'updateLinksForHtmlContent: document fetched');
         } catch (fetchError) {
-          logger.warn({ 
+          logger.warn({
             err: fetchError,
             filename,
             member,
@@ -643,19 +634,19 @@ async function updateLinksForHtmlContent(evidence: AgentEvidence[], services: Se
           };
         }
       } catch (error) {
-        logger.warn({ 
+        logger.warn({
           err: error,
           stack: error instanceof Error ? error.stack : undefined,
-          filename, 
-          member, 
-          evidenceId: item.id 
+          filename,
+          member,
+          evidenceId: item.id
         }, 'updateLinksForHtmlContent: error updating link for HTML content');
       }
 
       return item;
     })
   );
-  
+
   // Race between Promise.allSettled and overall timeout
   // Use 50 seconds to avoid Vercel Pro timeout (60s limit)
   // This gives us time to complete before Vercel kills the function
@@ -663,43 +654,43 @@ async function updateLinksForHtmlContent(evidence: AgentEvidence[], services: Se
   const reducedTimeoutPromise = new Promise<never>((_, reject) => {
     setTimeout(() => {
       const elapsed = Date.now() - overallStartTime;
-      logger.warn({ 
-        elapsedMs: elapsed, 
+      logger.warn({
+        elapsedMs: elapsed,
         evidenceCount: evidence.length,
-        timeoutMs: reducedTimeoutMs 
+        timeoutMs: reducedTimeoutMs
       }, 'updateLinksForHtmlContent: reduced timeout reached, returning partial results');
       reject(new Error(`updateLinksForHtmlContent timed out after ${reducedTimeoutMs}ms`));
     }, reducedTimeoutMs);
   });
-  
+
   let results;
   try {
     logger.info('updateLinksForHtmlContent: awaiting all document fetches with overall timeout');
     const settledResults = await Promise.race([updatePromise, reducedTimeoutPromise]);
-    
+
     // Extract results from settled promises
     results = settledResults.map((settled, index) => {
       if (settled.status === 'fulfilled') {
         return settled.value;
       } else {
-        logger.warn({ 
-          index, 
+        logger.warn({
+          index,
           error: settled.reason,
-          evidenceId: evidence[index]?.id 
+          evidenceId: evidence[index]?.id
         }, 'updateLinksForHtmlContent: item processing failed, using original');
         return evidence[index]; // Return original item if processing failed
       }
     });
-    
+
     const elapsed = Date.now() - overallStartTime;
-    logger.info({ 
+    logger.info({
       processedCount: results.length,
       inputCount: evidence.length,
       elapsedMs: elapsed
     }, 'updateLinksForHtmlContent: completed');
   } catch (overallError) {
     const elapsed = Date.now() - overallStartTime;
-    logger.error({ 
+    logger.error({
       err: overallError,
       elapsedMs: elapsed,
       evidenceCount: evidence.length
@@ -707,13 +698,13 @@ async function updateLinksForHtmlContent(evidence: AgentEvidence[], services: Se
     // Return evidence without HTML link updates if overall timeout occurs
     return evidence;
   }
-  
+
   return results;
 }
 
 async function hydrateEvidenceContent(evidence: AgentEvidence[], services: ServiceRegistry): Promise<AgentEvidence[]> {
   logger.info({ evidenceCount: evidence.length }, 'hydrateEvidenceContent: starting');
-  
+
   const lovdataClient = services.lovdata;
   const archiveStore = services.archive ?? null;
   if (!lovdataClient && !archiveStore) {
@@ -724,8 +715,8 @@ async function hydrateEvidenceContent(evidence: AgentEvidence[], services: Servi
   const contentCache = new Map<string, string>();
   const hydrationStartTime = Date.now();
   const hydrationTimeoutMs = 10000; // 10 seconds max for hydration - Vercel Pro allows 60s total
-  
-  logger.info({ 
+
+  logger.info({
     hasArchive: !!archiveStore,
     hasLovdata: !!lovdataClient,
     timeoutMs: hydrationTimeoutMs
@@ -770,7 +761,7 @@ async function hydrateEvidenceContent(evidence: AgentEvidence[], services: Servi
 
         const cacheKey = `${filename}::${actualMember}`;
         let fullText: string | null = preFetchedText;
-        
+
         // Get full text to check content type and cache truncated version
         if (!fullText) {
           if (archiveStore) {
@@ -781,7 +772,7 @@ async function hydrateEvidenceContent(evidence: AgentEvidence[], services: Servi
             fullText = result.text;
           }
         }
-        
+
         if (fullText && !contentCache.has(cacheKey)) {
           contentCache.set(cacheKey, truncateContent(fullText));
         }
@@ -811,12 +802,12 @@ async function hydrateEvidenceContent(evidence: AgentEvidence[], services: Servi
       }
     })
   );
-  
+
   // Add timeout to prevent hanging
   const hydrationTimeoutPromise = new Promise<never>((_, reject) => {
     setTimeout(() => {
       const elapsed = Date.now() - hydrationStartTime;
-      logger.warn({ 
+      logger.warn({
         elapsedMs: elapsed,
         evidenceCount: evidence.length,
         timeoutMs: hydrationTimeoutMs
@@ -824,40 +815,40 @@ async function hydrateEvidenceContent(evidence: AgentEvidence[], services: Servi
       reject(new Error(`hydrateEvidenceContent timed out after ${hydrationTimeoutMs}ms`));
     }, hydrationTimeoutMs);
   });
-  
+
   let settledResults;
   try {
     settledResults = await Promise.race([hydrationPromise, hydrationTimeoutPromise]);
   } catch (timeoutError) {
     // Timeout occurred - return evidence without full content
-    logger.warn({ 
+    logger.warn({
       err: timeoutError,
       evidenceCount: evidence.length
     }, 'hydrateEvidenceContent: timeout, returning evidence without full content');
     return evidence.map(item => ({ ...item, content: null }));
   }
-  
+
   // Extract results from settled promises
   const results = settledResults.map((settled, index) => {
     if (settled.status === 'fulfilled') {
       return settled.value;
     } else {
-      logger.warn({ 
-        index, 
+      logger.warn({
+        index,
         error: settled.reason,
-        evidenceId: evidence[index]?.id 
+        evidenceId: evidence[index]?.id
       }, 'hydrateEvidenceContent: item processing failed, using original without content');
       return { ...evidence[index], content: null }; // Return original item without content if processing failed
     }
   });
-  
+
   const elapsed = Date.now() - hydrationStartTime;
-  logger.info({ 
+  logger.info({
     processedCount: results.length,
     cacheSize: contentCache.size,
     elapsedMs: elapsed
   }, 'hydrateEvidenceContent: completed');
-  
+
   return results;
 }
 
@@ -914,13 +905,13 @@ function buildEvidence(result: LovdataSkillSearchResult): AgentEvidence[] {
 }
 
 function normaliseCitations(
-  citations: AgentOutputCitation[], 
-  evidence: AgentEvidence[], 
+  citations: AgentOutputCitation[],
+  evidence: AgentEvidence[],
   pagination: { page: number; pageSize: number }
 ): AgentOutputCitation[] {
   // Calculate offset based on pagination
   const offset = (pagination.page - 1) * pagination.pageSize;
-  
+
   // Create a map of evidence ID to its sequential position in the full list
   const evidenceIndexMap = new Map(
     evidence.map((item, index) => [item.id, offset + index + 1])
@@ -928,9 +919,9 @@ function normaliseCitations(
 
   if (!citations || citations.length === 0) {
     // No citations from agent - create default citations with correct sequential numbering
-    return evidence.map((item, index) => ({ 
-      evidenceId: item.id, 
-      label: `[${offset + index + 1}]` 
+    return evidence.map((item, index) => ({
+      evidenceId: item.id,
+      label: `[${offset + index + 1}]`
     }));
   }
 

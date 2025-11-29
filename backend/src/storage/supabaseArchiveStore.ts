@@ -23,11 +23,11 @@ export class SupabaseArchiveStore {
 
   constructor(options?: { logger?: Logger; enableEmbeddings?: boolean; enableChunking?: boolean }) {
     this.logs = options?.logger ?? defaultLogger;
-    
+
     // Initialize embedding service if embeddings are enabled
     // Check if OpenAI API key is available
     try {
-      this.embeddingService = options?.enableEmbeddings !== false 
+      this.embeddingService = options?.enableEmbeddings !== false
         ? new EmbeddingService({ logger: this.logs })
         : null;
       if (this.embeddingService) {
@@ -196,27 +196,27 @@ export class SupabaseArchiveStore {
       // Step 3: Generate embeddings if embedding service is available
       let embeddings: number[][] | null = null;
       if (this.embeddingService) {
-        const embeddingTimer = new Timer('generate_embeddings', this.logs, { 
-          filename, 
-          documentCount: documents.length 
+        const embeddingTimer = new Timer('generate_embeddings', this.logs, {
+          filename,
+          documentCount: documents.length
         });
-        
+
         try {
           // Generate embeddings for all documents
           // Use content for embedding (title + content would be better, but content is most important)
           const texts = documents.map(doc => doc.content);
           embeddings = await this.embeddingService.generateEmbeddings(texts);
           embeddingTimer.end({ embeddingCount: embeddings.length });
-          this.logs.info({ 
-            filename, 
-            embeddingCount: embeddings.length 
+          this.logs.info({
+            filename,
+            embeddingCount: embeddings.length
           }, 'Generated embeddings for documents');
         } catch (embeddingError) {
           // Log error but don't fail the entire ingestion
           // Documents will be inserted without embeddings
-          this.logs.error({ 
-            err: embeddingError, 
-            filename 
+          this.logs.error({
+            err: embeddingError,
+            filename
           }, 'Failed to generate embeddings - documents will be inserted without embeddings');
           embeddings = null;
         }
@@ -226,7 +226,7 @@ export class SupabaseArchiveStore {
       const batchSize = 500;
       const batchCount = Math.ceil(documents.length / batchSize);
       const documentIds: Map<string, number> = new Map(); // Map (archive_filename, member) -> document_id
-      
+
       for (let i = 0; i < documents.length; i += batchSize) {
         const batch = documents.slice(i, i + batchSize);
         const batchTimer = new Timer('insert_documents_batch', this.logs, {
@@ -236,7 +236,7 @@ export class SupabaseArchiveStore {
           batchSize: batch.length,
           hasEmbeddings: embeddings !== null
         });
-        
+
         const rows = batch.map((doc, idx) => {
           const row: any = {
             archive_filename: doc.archiveFilename,
@@ -246,13 +246,13 @@ export class SupabaseArchiveStore {
             content: doc.content,
             relative_path: doc.relativePath
           };
-          
+
           // Add embedding if available
           // Supabase pgvector expects arrays directly, not strings
           if (embeddings && embeddings[i + idx]) {
             row.embedding = embeddings[i + idx];
           }
-          
+
           return row;
         });
 
@@ -283,14 +283,14 @@ export class SupabaseArchiveStore {
       }
 
       // Step 5: Create and insert chunks for all documents
-      const chunkTimer = new Timer('create_and_insert_chunks', this.logs, { 
-        filename, 
-        documentCount: documents.length 
+      const chunkTimer = new Timer('create_and_insert_chunks', this.logs, {
+        filename,
+        documentCount: documents.length
       });
-      
+
       let totalChunks = 0;
       const chunkBatchSize = 200; // Insert chunks in batches
-      
+
       for (let i = 0; i < documents.length; i += 50) { // Process documents in smaller batches for chunking
         const docBatch = documents.slice(i, i + 50);
         const allChunks: Array<{
@@ -313,14 +313,14 @@ export class SupabaseArchiveStore {
         for (const doc of docBatch) {
           const key = `${doc.archiveFilename}:${doc.member}`;
           const documentId = documentIds.get(key);
-          
+
           if (!documentId) {
             this.logs.warn({ archive: doc.archiveFilename, member: doc.member }, 'Document ID not found, skipping chunk creation');
             continue;
           }
 
           const chunks = this.chunker.chunkDocument(doc.content);
-          
+
           for (const chunk of chunks) {
             allChunks.push({
               document_id: documentId,
@@ -344,7 +344,7 @@ export class SupabaseArchiveStore {
           try {
             const chunkTexts = allChunks.map(c => c.content);
             const chunkEmbeddings = await this.embeddingService.generateEmbeddings(chunkTexts);
-            
+
             for (let j = 0; j < allChunks.length && j < chunkEmbeddings.length; j++) {
               allChunks[j].embedding = chunkEmbeddings[j];
             }
@@ -386,7 +386,7 @@ export class SupabaseArchiveStore {
 
   startArchiveIngest(filename: string): ArchiveIngestSession {
     this.validateFilename(filename);
-    
+
     const documents: ArchiveDocument[] = [];
     let finalized = false;
     let discarded = false;
@@ -482,33 +482,33 @@ export class SupabaseArchiveStore {
 
     // Single optimized query with count
     const queryTimer = new Timer('db_text_search', this.logs, { tsQuery, limit, offset });
-    
+
     this.logs.info({ tsQuery, limit, offset }, 'searchAsync: executing database query');
-    
+
     // Add timeout to prevent hanging (60 seconds max - matches Vercel Pro function timeout)
     // This gives queries plenty of time to complete while still preventing infinite hangs
     const timeoutMs = 60000;
     let timeoutHandle: NodeJS.Timeout | null = null;
     let queryAborted = false;
     const queryStartTime = Date.now();
-    
+
     this.logs.info({ timeoutMs }, 'searchAsync: setting up query with timeout');
-    
+
     const queryPromise = (async () => {
       try {
         this.logs.info('searchAsync: starting Supabase query');
-        console.log(`[SupabaseArchiveStore] Starting query: ${tsQuery}, limit: ${limit}, offset: ${offset}`);
-        this.logs.info({ 
+        // console.log(`[SupabaseArchiveStore] Starting query: ${tsQuery}, limit: ${limit}, offset: ${offset}`);
+        this.logs.info({
           table: 'lovdata_documents',
           tsQuery,
           limit,
           offset
         }, 'searchAsync: building query chain');
-        
+
         // Use hybrid search if embeddings are available, otherwise fall back to FTS-only
         let rpcFunctionName: string;
         let rpcParams: any;
-        
+
         // Use chunk-based search for better granularity
         if (queryEmbedding && this.embeddingService) {
           // Use hybrid search on chunks with RRF (Reciprocal Rank Fusion)
@@ -520,8 +520,8 @@ export class SupabaseArchiveStore {
             result_offset: offset,
             rrf_k: 60  // RRF constant (typical value)
           };
-          
-          this.logs.info({ 
+
+          this.logs.info({
             rpcFunction: rpcFunctionName,
             queryLength: query.length,
             embeddingLength: queryEmbedding.length,
@@ -539,80 +539,75 @@ export class SupabaseArchiveStore {
             result_limit: limit,
             result_offset: offset
           };
-          
-          this.logs.info({ 
+
+          this.logs.info({
             rpcFunction: rpcFunctionName,
             rpcParams,
             tsQuery,
             searchType: 'documents_fallback'
           }, 'searchAsync: using FTS-only search on documents (chunk search not available)');
         }
-        
+
         // Add an additional timeout wrapper around the query itself
         // This ensures we catch hanging queries even if the outer Promise.race doesn't work
         // Use 30 seconds - reasonable timeout that leaves buffer for Vercel Pro 60s limit
         const queryTimeoutMs = 30000; // 30 seconds for the query itself - leaves 30s buffer for other operations
         let queryTimeoutHandle: NodeJS.Timeout | null = null;
-        
+
         // Add safety checks to ensure we're still running (store references to clear them later)
         const safetyCheckTimeouts: NodeJS.Timeout[] = [];
-        
+
+        // Reduced logging for safety checks
+        /*
         const safetyCheck2s = setTimeout(() => {
           const elapsed = Date.now() - queryStartTime;
-          console.log(`[SupabaseArchiveStore] 2 second safety check - elapsed: ${elapsed}ms (timeout should trigger at ${queryTimeoutMs}ms)`);
-          this.logs.info({ elapsedMs: elapsed, queryTimeoutMs }, 'searchAsync: 2 second safety check - still running, timeout pending');
+          this.logs.debug({ elapsedMs: elapsed, queryTimeoutMs }, 'searchAsync: 2 second safety check');
         }, 2000);
         safetyCheckTimeouts.push(safetyCheck2s);
-        
-        const safetyCheck28s = setTimeout(() => {
-          const elapsed = Date.now() - queryStartTime;
-          console.log(`[SupabaseArchiveStore] 2.8 second safety check - elapsed: ${elapsed}ms (timeout will trigger in ~200ms at ${queryTimeoutMs}ms)`);
-          this.logs.info({ elapsedMs: elapsed, queryTimeoutMs }, 'searchAsync: 2.8 second safety check - timeout about to trigger');
-        }, 2800);
-        safetyCheckTimeouts.push(safetyCheck28s);
-        
+        */
+
         try {
           this.logs.info({ queryTimeoutMs, queryStartTime }, 'searchAsync: awaiting RPC query with internal timeout');
-          
+
           // Log right before Promise.race to ensure we get there
           const raceStartTime = Date.now();
           this.logs.info({ raceStartTime }, 'searchAsync: starting internal Promise.race');
-          
+
           // Log right before we execute the RPC call
-          console.log(`[SupabaseArchiveStore] About to execute RPC call...`);
+          // console.log(`[SupabaseArchiveStore] About to execute RPC call...`);
           this.logs.info('searchAsync: executing RPC function');
-          
+
           // Execute the RPC call and count query in parallel with timeout protection
           const queryExecutionPromise = (async () => {
             try {
               // Call the RPC function for results
               const rpcCallPromise = this.supabase.rpc(rpcFunctionName, rpcParams);
-              
+
               // Also get the total count separately (RPC function may not return count)
               // We'll use a simple count query with the same search criteria
               const countQueryBuilder = this.supabase
-      .from('lovdata_documents')
+                .from('lovdata_documents')
                 .select('*', { count: 'exact', head: true })
-      .textSearch('tsv_content', tsQuery, {
-        type: 'plain',
-        config: 'norwegian'
+                .textSearch('tsv_content', tsQuery, {
+                  type: 'plain',
+                  config: 'norwegian'
                 });
-              
+
               // Execute both queries in parallel
               const [rpcResult, countResult] = await Promise.all([
                 rpcCallPromise,
                 countQueryBuilder
               ]);
-              
+
               // Handle RPC result
               if (rpcResult.error) {
                 this.logs.error({ err: rpcResult.error, rpcFunction: rpcFunctionName }, 'searchAsync: RPC function failed');
                 throw rpcResult.error;
               }
-              
+
               // Handle count result
               const total = countResult.count ?? 0;
-              
+
               // Map RPC result to expected format
               // Chunk search returns: { id, document_id, chunk_index, content, archive_filename, member, document_title, document_date, section_title, section_number, fts_rank, vector_distance, rrf_score }
               // Document search returns: { archive_filename, member, title, document_date, content, rank }
@@ -640,61 +635,62 @@ export class SupabaseArchiveStore {
                   };
                 }
               });
-              
+
               // Return result in the same format as the original query
               const result = {
                 data,
                 error: null,
                 count: total
               };
-              
+
               const raceDuration = Date.now() - raceStartTime;
-              console.log(`[SupabaseArchiveStore] RPC query completed after ${raceDuration}ms`);
-              this.logs.info({ 
-                raceDurationMs: raceDuration, 
+              // console.log(`[SupabaseArchiveStore] RPC query completed after ${raceDuration}ms`);
+              this.logs.info({
+                raceDurationMs: raceDuration,
                 resolvedBy: 'query',
                 resultCount: data.length,
                 total
               }, 'searchAsync: internal Promise.race resolved - query won');
-              
+
               return result;
             } catch (err: unknown) {
               const raceDuration = Date.now() - raceStartTime;
-              console.log(`[SupabaseArchiveStore] RPC query failed after ${raceDuration}ms:`, err instanceof Error ? err.message : String(err));
+              // console.log(`[SupabaseArchiveStore] RPC query failed after ${raceDuration}ms:`, err instanceof Error ? err.message : String(err));
               this.logs.error({ err, raceDurationMs: raceDuration }, 'searchAsync: RPC query failed');
               throw err;
             }
           })();
-          
-          console.log(`[SupabaseArchiveStore] Starting internal Promise.race, queryTimeoutMs: ${queryTimeoutMs}`);
+
+          // console.log(`[SupabaseArchiveStore] Starting internal Promise.race, queryTimeoutMs: ${queryTimeoutMs}`);
           const internalRaceStartTime = Date.now();
-          
-          // Log right before timeout to confirm it's about to trigger
+
+          // Reduced logging for timeout check
+          /*
           const safetyCheck29s = setTimeout(() => {
             const elapsed = Date.now() - queryStartTime;
-            console.log(`[SupabaseArchiveStore] 2.9 second check - elapsed: ${elapsed}ms (timeout will trigger in ~100ms at ${queryTimeoutMs}ms)`);
-            this.logs.info({ elapsedMs: elapsed, queryTimeoutMs }, 'searchAsync: 2.9 second check - timeout about to trigger');
+            this.logs.debug({ elapsedMs: elapsed, queryTimeoutMs }, 'searchAsync: 2.9 second check');
           }, 2900);
           safetyCheckTimeouts.push(safetyCheck29s);
-          
+          */
+
           // Create a timeout promise that resolves (not rejects) to make Promise.race work properly
           const timeoutWrapperPromise = new Promise<{ type: 'timeout'; error: Error }>((resolve) => {
             queryTimeoutHandle = setTimeout(() => {
               const raceDuration = Date.now() - internalRaceStartTime;
               const elapsed = Date.now() - queryStartTime;
-              console.log(`[SupabaseArchiveStore] INTERNAL TIMEOUT TRIGGERED after ${elapsed}ms (race: ${raceDuration}ms)`);
+              // console.log(`[SupabaseArchiveStore] INTERNAL TIMEOUT TRIGGERED after ${elapsed}ms (race: ${raceDuration}ms)`);
               this.logs.error({ elapsedMs: elapsed, raceDurationMs: raceDuration, queryTimeoutMs }, 'searchAsync: query execution timed out (internal timeout)');
-              resolve({ 
-                type: 'timeout' as const, 
-                error: new Error(`Query execution timed out after ${queryTimeoutMs}ms`) 
+              resolve({
+                type: 'timeout' as const,
+                error: new Error(`Query execution timed out after ${queryTimeoutMs}ms`)
               });
             }, queryTimeoutMs);
           });
-          
+
           const internalRacePromise = Promise.race([
             queryExecutionPromise.then(result => {
               const raceDuration = Date.now() - internalRaceStartTime;
-              console.log(`[SupabaseArchiveStore] INTERNAL RACE: Query won after ${raceDuration}ms`);
+              // console.log(`[SupabaseArchiveStore] INTERNAL RACE: Query won after ${raceDuration}ms`);
               if (queryTimeoutHandle) {
                 clearTimeout(queryTimeoutHandle);
               }
@@ -702,44 +698,44 @@ export class SupabaseArchiveStore {
             }),
             timeoutWrapperPromise.then(timeoutResult => {
               const raceDuration = Date.now() - internalRaceStartTime;
-              console.log(`[SupabaseArchiveStore] INTERNAL RACE: Timeout won after ${raceDuration}ms`);
+              // console.log(`[SupabaseArchiveStore] INTERNAL RACE: Timeout won after ${raceDuration}ms`);
               this.logs.info({ raceDurationMs: raceDuration, resolvedBy: 'timeout' }, 'searchAsync: internal Promise.race resolved - timeout won');
               return timeoutResult;
             })
           ]);
-          
-          console.log(`[SupabaseArchiveStore] Awaiting internal race result...`);
+
+          // console.log(`[SupabaseArchiveStore] Awaiting internal race result...`);
           const internalRaceResult = await internalRacePromise;
-          
+
           if (internalRaceResult.type === 'timeout') {
-            console.log(`[SupabaseArchiveStore] Internal race resolved with timeout, throwing error`);
+            // console.log(`[SupabaseArchiveStore] Internal race resolved with timeout, throwing error`);
             throw internalRaceResult.error;
           }
-          
-          console.log(`[SupabaseArchiveStore] Internal race resolved with success, result has data: ${!!internalRaceResult.result?.data}`);
+
+          // console.log(`[SupabaseArchiveStore] Internal race resolved with success, result has data: ${!!internalRaceResult.result?.data}`);
           const result = internalRaceResult.result;
-          
+
           // Clear all timeouts when query completes
           if (queryTimeoutHandle) {
             clearTimeout(queryTimeoutHandle);
           }
           safetyCheckTimeouts.forEach(timeout => clearTimeout(timeout));
-          
+
           const queryDuration = Date.now() - queryStartTime;
           this.logs.info({ queryDurationMs: queryDuration }, 'searchAsync: RPC query promise resolved');
-          
+
           if (queryAborted) {
             this.logs.warn('searchAsync: query completed but was already aborted');
             throw new Error('Query was aborted due to timeout');
           }
-          
-          this.logs.info({ 
+
+          this.logs.info({
             hasData: !!result.data,
             dataLength: result.data?.length ?? 0,
             hasError: !!result.error,
             count: result.count
           }, 'searchAsync: query completed');
-          
+
           return result;
         } catch (queryTimeoutError) {
           if (queryTimeoutHandle) {
@@ -758,7 +754,7 @@ export class SupabaseArchiveStore {
         throw queryError;
       }
     })();
-    
+
     const timeoutPromise = new Promise<{ type: 'timeout' }>((resolve) => {
       timeoutHandle = setTimeout(() => {
         const elapsed = Date.now() - queryStartTime;
@@ -767,21 +763,21 @@ export class SupabaseArchiveStore {
         resolve({ type: 'timeout' });
       }, timeoutMs);
     });
-    
+
     let data: any[] | null | undefined;
     let error: any | null | undefined;
     let count: number | null | undefined;
-    
+
     // Declare timeout variables outside try block so they're accessible in catch
     let progressInterval: NodeJS.Timeout | undefined;
     let outerSafetyCheckTimeouts: NodeJS.Timeout[] = [];
-    
+
     try {
       this.logs.info({ queryStartTime, timeoutMs }, 'searchAsync: waiting for query result with timeout');
-      
+
       // Log immediately before setting up Promise.race
       this.logs.info({ elapsedMs: 0 }, 'searchAsync: progress check - starting Promise.race');
-      
+
       // Add a safety check - log periodically to see if we're still waiting
       // Use info level to ensure it shows up in Vercel logs
       // Log every 5 seconds for longer timeout
@@ -791,10 +787,10 @@ export class SupabaseArchiveStore {
         const elapsed = Date.now() - queryStartTime;
         this.logs.info({ elapsedMs: elapsed, timeoutMs, progress: `${Math.round((elapsed / timeoutMs) * 100)}%` }, 'searchAsync: still waiting for query (progress check)');
       }, 5000);
-      
+
       // Store references to all safety check timeouts for cleanup
       outerSafetyCheckTimeouts = [];
-      
+
       // Also log after 1, 3, and 5 seconds to track progress
       const safetyCheck1s = setTimeout(() => {
         const elapsed = Date.now() - queryStartTime;
@@ -802,23 +798,23 @@ export class SupabaseArchiveStore {
         this.logs.info({ elapsedMs: elapsed }, 'searchAsync: 1 second check - function still running');
       }, 1000);
       outerSafetyCheckTimeouts.push(safetyCheck1s);
-      
+
       const safetyCheck3s = setTimeout(() => {
         const elapsed = Date.now() - queryStartTime;
         console.log(`[SupabaseArchiveStore] 3 second check - elapsed: ${elapsed}ms`);
         this.logs.info({ elapsedMs: elapsed }, 'searchAsync: 3 second check - function still running');
       }, 3000);
       outerSafetyCheckTimeouts.push(safetyCheck3s);
-      
+
       const safetyCheck5s = setTimeout(() => {
         const elapsed = Date.now() - queryStartTime;
         console.log(`[SupabaseArchiveStore] 5 second check - elapsed: ${elapsed}ms`);
         this.logs.info({ elapsedMs: elapsed }, 'searchAsync: 5 second check - function still running');
       }, 5000);
       outerSafetyCheckTimeouts.push(safetyCheck5s);
-      
+
       this.logs.info('searchAsync: progress interval and timed checks set up');
-      
+
       // Use a wrapper that ensures timeout always triggers
       console.log(`[SupabaseArchiveStore] Starting Promise.race for query, timeout: ${timeoutMs}ms`);
       const racePromise = Promise.race([
@@ -835,7 +831,7 @@ export class SupabaseArchiveStore {
           return { type: 'timeout' as const };
         })
       ]);
-      
+
       console.log(`[SupabaseArchiveStore] Awaiting Promise.race result...`);
       const raceResult = await racePromise;
       console.log(`[SupabaseArchiveStore] Promise.race completed, result type: ${raceResult.type}`);
@@ -843,25 +839,25 @@ export class SupabaseArchiveStore {
       clearInterval(progressInterval);
       outerSafetyCheckTimeouts.forEach(timeout => clearTimeout(timeout));
       this.logs.info({ resultType: raceResult.type }, 'searchAsync: Promise.race completed, cleaning up interval');
-      
+
       if (timeoutHandle) {
         clearTimeout(timeoutHandle);
       }
-      
+
       if (raceResult.type === 'timeout') {
         const elapsed = Date.now() - queryStartTime;
-        this.logs.error({ 
+        this.logs.error({
           elapsedMs: elapsed,
-          query, 
-          tsQuery, 
-          limit, 
-          offset 
+          query,
+          tsQuery,
+          limit,
+          offset
         }, 'searchAsync: timeout reached in Promise.race');
         queryTimer.end({ success: false, error: 'timeout' });
         searchTimer.end({ success: false, error: 'timeout' });
         return { hits: [], total: 0 };
       }
-      
+
       this.logs.info('searchAsync: Promise.race completed successfully');
       const result = raceResult.result;
       data = result.data;
@@ -877,13 +873,13 @@ export class SupabaseArchiveStore {
         clearInterval(progressInterval);
       }
       outerSafetyCheckTimeouts.forEach((timeout: NodeJS.Timeout) => clearTimeout(timeout));
-      this.logs.error({ 
-        err: timeoutError, 
+      this.logs.error({
+        err: timeoutError,
         elapsedMs: elapsed,
-        query, 
-        tsQuery, 
-        limit, 
-        offset 
+        query,
+        tsQuery,
+        limit,
+        offset
       }, 'searchAsync: Promise.race rejected (timeout or error)');
       queryTimer.end({ success: false, error: timeoutError instanceof Error ? timeoutError.message : String(timeoutError) });
       searchTimer.end({ success: false, error: 'timeout' });
@@ -891,14 +887,14 @@ export class SupabaseArchiveStore {
       this.logs.info('searchAsync: returning empty results due to timeout');
       return { hits: [], total: 0 };
     }
-    
+
     queryTimer.end({ resultCount: data?.length ?? 0, totalCount: count ?? 0 });
-    
-    this.logs.info({ 
+
+    this.logs.info({
       hasData: !!data,
       dataLength: data?.length ?? 0,
       hasError: !!error,
-      count 
+      count
     }, 'searchAsync: about to check for errors');
 
     if (error) {
@@ -908,24 +904,24 @@ export class SupabaseArchiveStore {
       this.logs.info('searchAsync: returning empty hits due to error');
       return { hits: [], total: 0 };
     }
-    
+
     this.logs.info('searchAsync: no error, processing results');
 
     // For chunk searches, count may not be available, so use data length if we have data
     // For document searches, count should be available from the RPC function
     const total = count ?? (data && data.length > 0 ? data.length : 0);
     this.logs.info({ total, count, dataLength: data?.length ?? 0 }, 'searchAsync: checking if results are empty');
-    
+
     // If we have data, use it even if count is 0 (chunk searches don't return count)
     if (!data || data.length === 0) {
       searchTimer.end({ hits: 0, total: 0 });
       this.logs.info('searchAsync: returning empty results (no data)');
       return { hits: [], total: 0 };
     }
-    
+
     // If we have data but count is 0, use data length as total
     const effectiveTotal = count && count > 0 ? count : data.length;
-    
+
     this.logs.info({ dataLength: data.length, total }, 'searchAsync: processing non-empty results');
 
     // Generate snippets from content
@@ -936,18 +932,18 @@ export class SupabaseArchiveStore {
       let snippet: string;
       if (doc.chunk_index !== undefined) {
         // Chunk result - use chunk content as snippet (truncate if needed)
-        snippet = doc.content.length > 300 
+        snippet = doc.content.length > 300
           ? doc.content.substring(0, 297) + '...'
           : doc.content;
-        
+
         // Add section info to title if available
         let displayTitle = doc.title;
         if (doc.section_number) {
-          displayTitle = displayTitle 
+          displayTitle = displayTitle
             ? `${displayTitle} (${doc.section_number})`
             : `§ ${doc.section_number}`;
         }
-        
+
         return {
           filename: doc.archive_filename,
           member: doc.member,
@@ -970,8 +966,8 @@ export class SupabaseArchiveStore {
     snippetTimer.end({ snippetCount: hits.length });
 
     searchTimer.end({ hits: hits.length, total: effectiveTotal });
-    
-    this.logs.info({ 
+
+    this.logs.info({
       hitsCount: hits.length,
       total: effectiveTotal,
       originalCount: count
@@ -1023,7 +1019,7 @@ export class SupabaseArchiveStore {
     // Add timeout to prevent hanging (5 seconds)
     const timeoutMs = 5000;
     const fetchStartTime = Date.now();
-    
+
     this.logs.info({ filename, member, timeoutMs }, 'getDocumentContentAsync: starting fetch with timeout');
 
     const queryPromise = (async () => {
@@ -1031,35 +1027,35 @@ export class SupabaseArchiveStore {
         this.logs.info({ filename, member }, 'getDocumentContentAsync: executing Supabase query');
         const queryStartTime = Date.now();
 
-    const { data, error } = await this.supabase
-      .from('lovdata_documents')
-      .select('content')
-      .eq('archive_filename', filename)
-      .eq('member', member)
-      .maybeSingle();
+        const { data, error } = await this.supabase
+          .from('lovdata_documents')
+          .select('content')
+          .eq('archive_filename', filename)
+          .eq('member', member)
+          .maybeSingle();
 
         const fetchDuration = Date.now() - fetchStartTime;
-        this.logs.info({ 
-          fetchDurationMs: fetchDuration, 
-          hasError: !!error, 
+        this.logs.info({
+          fetchDurationMs: fetchDuration,
+          hasError: !!error,
           hasData: !!data,
           contentLength: data?.content?.length ?? 0
         }, 'getDocumentContentAsync: query completed');
 
-    if (error) {
-      fetchTimer.end({ success: false, found: false, error: error.message });
-      this.logs.error({ err: error, filename, member }, 'Failed to fetch document content');
-      return null;
-    }
+        if (error) {
+          fetchTimer.end({ success: false, found: false, error: error.message });
+          this.logs.error({ err: error, filename, member }, 'Failed to fetch document content');
+          return null;
+        }
 
-    if (!data) {
-      fetchTimer.end({ success: true, found: false });
-      return null;
-    }
+        if (!data) {
+          fetchTimer.end({ success: true, found: false });
+          return null;
+        }
 
-    const contentLength = data.content?.length ?? 0;
-    fetchTimer.end({ success: true, found: true, contentLength });
-    return data.content;
+        const contentLength = data.content?.length ?? 0;
+        fetchTimer.end({ success: true, found: true, contentLength });
+        return data.content;
       } catch (queryError) {
         const fetchDuration = Date.now() - fetchStartTime;
         this.logs.error({ err: queryError, fetchDurationMs: fetchDuration }, 'getDocumentContentAsync: query error');
@@ -1096,43 +1092,43 @@ export class SupabaseArchiveStore {
     this.validateMember(member);
 
     try {
-    const { data, error } = await this.supabase
-      .from('lovdata_documents')
-      .select('content, title, document_date, relative_path')
-      .eq('archive_filename', filename)
-      .eq('member', member)
-      .maybeSingle();
+      const { data, error } = await this.supabase
+        .from('lovdata_documents')
+        .select('content, title, document_date, relative_path')
+        .eq('archive_filename', filename)
+        .eq('member', member)
+        .maybeSingle();
 
-    if (error) {
+      if (error) {
         // Log Supabase errors with more detail
-        this.logs.error({ 
-          err: error, 
-          filename, 
+        this.logs.error({
+          err: error,
+          filename,
           member,
           errorCode: (error as any)?.code,
           errorMessage: (error as any)?.message,
           errorDetails: (error as any)?.details,
           errorHint: (error as any)?.hint
         }, 'Failed to fetch document from Supabase');
-      return null;
-    }
+        return null;
+      }
 
-    if (!data) {
+      if (!data) {
         this.logs.debug({ filename, member }, 'Document not found in Supabase');
-      return null;
-    }
+        return null;
+      }
 
-    return {
-      content: data.content,
-      title: data.title,
-      date: data.document_date,
-      relativePath: data.relative_path
-    };
+      return {
+        content: data.content,
+        title: data.title,
+        date: data.document_date,
+        relativePath: data.relative_path
+      };
     } catch (queryError) {
       // Handle unexpected errors
-      this.logs.error({ 
-        err: queryError, 
-        filename, 
+      this.logs.error({
+        err: queryError,
+        filename,
         member,
         errorType: queryError instanceof Error ? queryError.constructor.name : typeof queryError
       }, 'Unexpected error in getDocumentAsync');
@@ -1151,7 +1147,7 @@ export class SupabaseArchiveStore {
     const safeFilename = this.sanitizeStoragePath(filename);
     const safeMember = this.sanitizeStoragePath(member);
     const relativePath = `${safeFilename}/${safeMember}`;
-    
+
     return {
       absolutePath: `lovdata-documents/${relativePath}`,
       relativePath
@@ -1174,7 +1170,7 @@ export class SupabaseArchiveStore {
       const safeFilename = this.sanitizeStoragePath(filename);
       const safeMember = this.sanitizeStoragePath(member);
       const storagePath = `lovdata-documents/${safeFilename}/${safeMember}`;
-      
+
       const { data, error } = await this.supabase.storage.from('lovdata-documents').download(storagePath);
 
       if (error || !data) {
