@@ -21,7 +21,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
       <div className="assistant-output">
         <div className="assistant-summary">
           Viser side {assistantData.pagination.page} av {assistantData.pagination.totalPages} ·{' '}
-          {assistantData.pagination.totalHits} treff
+          {assistantData.evidence.length} treff
         </div>
         <ol className="assistant-evidence-list">
           {assistantData.evidence.map((item, index) => {
