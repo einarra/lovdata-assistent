@@ -244,7 +244,10 @@ export class SupabaseArchiveStore {
             title: doc.title,
             document_date: doc.date,
             content: doc.content,
-            relative_path: doc.relativePath
+            relative_path: doc.relativePath,
+            law_type: doc.lawType ?? null,
+            year: doc.year ?? null,
+            ministry: doc.ministry ?? null
           };
 
           // Add embedding if available
@@ -306,6 +309,9 @@ export class SupabaseArchiveStore {
           document_date: string | null;
           section_title: string | null;
           section_number: string | null;
+          law_type: string | null;
+          year: number | null;
+          ministry: string | null;
           embedding?: number[];
         }> = [];
 
@@ -334,7 +340,10 @@ export class SupabaseArchiveStore {
               document_title: doc.title,
               document_date: doc.date,
               section_title: chunk.metadata.sectionTitle ?? null,
-              section_number: chunk.metadata.sectionNumber ?? null
+              section_number: chunk.metadata.sectionNumber ?? null,
+              law_type: doc.lawType ?? null,
+              year: doc.year ?? null,
+              ministry: doc.ministry ?? null
             });
           }
         }
@@ -434,13 +443,25 @@ export class SupabaseArchiveStore {
     return { hits: [], total: 0 };
   }
 
-  async searchAsync(query: string, options: { limit: number; offset: number }): Promise<ArchiveSearchResult> {
+  async searchAsync(
+    query: string,
+    options: {
+      limit: number;
+      offset: number;
+      filters?: {
+        year?: number | null;
+        lawType?: string | null;
+        ministry?: string | null;
+      };
+    }
+  ): Promise<ArchiveSearchResult> {
     const searchTimer = new Timer('db_search', this.logs, {
       query: query.substring(0, 100),
       queryLength: query.length,
       limit: options.limit,
       offset: options.offset,
-      useHybridSearch: this.embeddingService !== null
+      useHybridSearch: this.embeddingService !== null,
+      filters: options.filters
     });
 
     // Validate query
@@ -518,7 +539,10 @@ export class SupabaseArchiveStore {
             query_embedding: queryEmbedding,  // Pass as array directly
             result_limit: limit,
             result_offset: offset,
-            rrf_k: 60  // RRF constant (typical value)
+            rrf_k: 60,  // RRF constant (typical value)
+            filter_year: options.filters?.year ?? null,
+            filter_law_type: options.filters?.lawType ?? null,
+            filter_ministry: options.filters?.ministry ?? null
           };
 
           this.logs.info({

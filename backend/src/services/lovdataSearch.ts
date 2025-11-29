@@ -29,6 +29,11 @@ export async function searchLovdataPublicData(options: {
   pageSize: number;
   enableReranking?: boolean;
   rerankTopN?: number; // Number of candidates to retrieve for re-ranking (default: 50)
+  filters?: {
+    year?: number | null;
+    lawType?: string | null;
+    ministry?: string | null;
+  };
 }): Promise<LovdataSearchResult> {
   const { store, query } = options;
   const page = Math.max(1, options.page);
@@ -65,7 +70,8 @@ export async function searchLovdataPublicData(options: {
   try {
     result = await store.searchAsync(query, {
       limit: candidateLimit,
-      offset: enableReranking ? 0 : offset // Start from 0 when re-ranking, use offset otherwise
+      offset: enableReranking ? 0 : offset, // Start from 0 when re-ranking, use offset otherwise
+      filters: options.filters
     });
     logger.info({ 
       hitsCount: result.hits.length,

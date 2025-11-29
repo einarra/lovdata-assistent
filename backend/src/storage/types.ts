@@ -7,6 +7,9 @@ export type ArchiveDocument = {
   date: string | null;
   content: string;
   relativePath: string;
+  lawType?: string | null;
+  year?: number | null;
+  ministry?: string | null;
 };
 
 export type ArchiveIngestSession = {

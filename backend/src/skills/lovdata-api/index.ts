@@ -14,6 +14,11 @@ type LovdataSkillInput =
       maxHits?: number;
       page?: number;
       pageSize?: number;
+      filters?: {
+        year?: number | null;
+        lawType?: string | null;
+        ministry?: string | null;
+      };
     };
 
 type Services = {
@@ -75,7 +80,8 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
         store: archiveStore,
         query: command.query,
         page,
-        pageSize
+        pageSize,
+        filters: command.filters
       });
 
       const hits = searchResult?.hits ?? [];
@@ -183,7 +189,8 @@ function normalizeInput(input: unknown): LovdataSkillInput {
     if (pathMatch?.groups?.path) {
       return { action: 'fetchJson', path: pathMatch.groups.path };
     }
-    return { action: 'searchPublicData', query: trimmed };
+    const inferredFilters = inferFiltersFromQuery(trimmed);
+    return { action: 'searchPublicData', query: trimmed, filters: inferredFilters };
   }
 
   if (typeof input === 'object') {
@@ -205,13 +212,17 @@ function normalizeInput(input: unknown): LovdataSkillInput {
       if (!('query' in candidate) || typeof candidate.query !== 'string' || candidate.query.trim().length === 0) {
         throw new Error("'searchPublicData' action requires a query string");
       }
+      const query = candidate.query.trim();
+      // Infer filters from query if not explicitly provided
+      const inferredFilters = candidate.filters ?? inferFiltersFromQuery(query);
       return {
         action: 'searchPublicData',
-        query: candidate.query.trim(),
+        query,
         latest: candidate.latest,
         maxHits: candidate.maxHits,
         page: candidate.page,
-        pageSize: candidate.pageSize
+        pageSize: candidate.pageSize,
+        filters: inferredFilters
       };
     }
   }
@@ -219,6 +230,91 @@ function normalizeInput(input: unknown): LovdataSkillInput {
   throw new Error('Unsupported Lovdata skill input shape');
 }
 
+/**
+ * Infers metadata filters from user query text.
+ * Extracts year, law type, and ministry mentions from natural language queries.
+ */
+function inferFiltersFromQuery(query: string): {
+  year?: number | null;
+  lawType?: string | null;
+  ministry?: string | null;
+} {
+  const filters: {
+    year?: number | null;
+    lawType?: string | null;
+    ministry?: string | null;
+  } = {};
+
+  const lowerQuery = query.toLowerCase();
+
+  // Extract year (e.g., "from 2023", "in 2023", "2023 laws", "laws from 2023")
+  const yearPatterns = [
+    /(?:fra|from|i|in|år|year)\s+(\d{4})\b/i,
+    /\b(\d{4})\s+(?:lov|forskrift|vedtak|reglement)/i,
+    /\b(19|20)\d{2}\b/
+  ];
+
+  for (const pattern of yearPatterns) {
+    const match = query.match(pattern);
+    if (match) {
+      const year = parseInt(match[1] || match[0], 10);
+      if (year >= 1900 && year <= 2100) {
+        filters.year = year;
+        break;
+      }
+    }
+  }
+
+  // Extract law type
+  const lawTypePatterns = [
+    { pattern: /\b(lov|act)\b/i, type: 'Lov' },
+    { pattern: /\b(forskrift|regulation)\b/i, type: 'Forskrift' },
+    { pattern: /\b(vedtak|decision)\b/i, type: 'Vedtak' },
+    { pattern: /\b(cirkulær|circular)\b/i, type: 'Cirkulær' },
+    { pattern: /\b(rundskriv|circular letter)\b/i, type: 'Rundskriv' },
+    { pattern: /\b(instruks|instruction)\b/i, type: 'Instruks' },
+    { pattern: /\b(reglement|regulations)\b/i, type: 'Reglement' }
+  ];
+
+  for (const { pattern, type } of lawTypePatterns) {
+    if (pattern.test(query)) {
+      filters.lawType = type;
+      break;
+    }
+  }
+
+  // Extract ministry (common Norwegian ministries)
+  const ministries = [
+    { patterns: [/\b(arbeids-?\s*og\s*sosialdepartementet|arbeidsdepartementet)\b/i], name: 'Arbeids- og sosialdepartementet' },
+    { patterns: [/\b(barne-?\s*og\s*familiedepartementet|barnefamiliedepartementet)\b/i], name: 'Barne- og familiedepartementet' },
+    { patterns: [/\b(digitaliserings-?\s*og\s*forvaltningsdepartementet)\b/i], name: 'Digitaliserings- og forvaltningsdepartementet' },
+    { patterns: [/\b(finansdepartementet)\b/i], name: 'Finansdepartementet' },
+    { patterns: [/\b(forsvarsdepartementet)\b/i], name: 'Forsvarsdepartementet' },
+    { patterns: [/\b(helse-?\s*og\s*omsorgsdepartementet)\b/i], name: 'Helse- og omsorgsdepartementet' },
+    { patterns: [/\b(justis-?\s*og\s*beredskapsdepartementet|justisdepartementet)\b/i], name: 'Justis- og beredskapsdepartementet' },
+    { patterns: [/\b(klima-?\s*og\s*miljødepartementet)\b/i], name: 'Klima- og miljødepartementet' },
+    { patterns: [/\b(kommunal-?\s*og\s*distriktsdepartementet)\b/i], name: 'Kommunal- og distriktsdepartementet' },
+    { patterns: [/\b(kultur-?\s*og\s*likestillingsdepartementet)\b/i], name: 'Kultur- og likestillingsdepartementet' },
+    { patterns: [/\b(nærings-?\s*og\s*fiskeridepartementet)\b/i], name: 'Nærings- og fiskeridepartementet' },
+    { patterns: [/\b(olje-?\s*og\s*energidepartementet)\b/i], name: 'Olje- og energidepartementet' },
+    { patterns: [/\b(samferdselsdepartementet)\b/i], name: 'Samferdselsdepartementet' },
+    { patterns: [/\b(utdannings-?\s*og\s*forskningsdepartementet)\b/i], name: 'Utdannings- og forskningsdepartementet' },
+    { patterns: [/\b(utenriksdepartementet)\b/i], name: 'Utenriksdepartementet' }
+  ];
+
+  for (const ministry of ministries) {
+    for (const pattern of ministry.patterns) {
+      if (pattern.test(query)) {
+        filters.ministry = ministry.name;
+        return filters; // Return early once ministry is found
+      }
+    }
+  }
+
+  return filters;
+}
+
 export const __test__ = {
-  normalizeInput
+  normalizeInput,
+  inferFiltersFromQuery
 };
