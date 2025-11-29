@@ -875,6 +875,17 @@ function truncateContent(text: string): string {
 function buildEvidence(result: LovdataSkillSearchResult): AgentEvidence[] {
   const evidence: AgentEvidence[] = [];
 
+  (result.fallback?.organic ?? []).forEach((item, index) => {
+    evidence.push({
+      id: `fallback-${index + 1}`,
+      source: result.fallback?.provider ?? 'web',
+      title: item.title ?? 'Uten tittel',
+      snippet: item.snippet ?? null,
+      date: item.date ?? null,
+      link: item.link ?? null
+    });
+  });
+
   (result.hits ?? []).forEach((hit, index) => {
     evidence.push({
       id: `lovdata-${index + 1}`,
@@ -887,17 +898,6 @@ function buildEvidence(result: LovdataSkillSearchResult): AgentEvidence[] {
         filename: hit.filename,
         member: hit.member
       }
-    });
-  });
-
-  (result.fallback?.organic ?? []).forEach((item, index) => {
-    evidence.push({
-      id: `fallback-${index + 1}`,
-      source: result.fallback?.provider ?? 'web',
-      title: item.title ?? 'Uten tittel',
-      snippet: item.snippet ?? null,
-      date: item.date ?? null,
-      link: item.link ?? null
     });
   });
 
