@@ -134,7 +134,8 @@ const envSchema = z.object({
   ENABLE_RERANKING: z.string().transform(val => val === 'true' || val === '1').default('true'),
   LANGSMITH_API_KEY: z.string().optional(),
   LANGSMITH_PROJECT: z.string().optional(),
-  LANGSMITH_ENDPOINT: z.string().optional()
+  LANGSMITH_ENDPOINT: z.string().optional(),
+  ALLOWED_ORIGINS: z.string().optional() // Comma-separated list of allowed CORS origins
 });
 
 // Debug: Check process.env before parsing

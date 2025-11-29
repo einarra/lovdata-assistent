@@ -1,5 +1,6 @@
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
+import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { getOrchestrator } from '../skills/index.js';
 import { getServices } from '../services/index.js';
@@ -12,6 +13,7 @@ import { isReady } from '../state/runtimeState.js';
 import { requireSupabaseAuth, type AuthenticatedRequest } from './middleware/requireSupabaseAuth.js';
 import { getSupabaseAdminClient } from '../services/supabaseClient.js';
 import { Timer, timeOperation } from '../utils/timing.js';
+import { env } from '../config/env.js';
 
 const runSchema = z.object({
   input: z.unknown(),
@@ -56,12 +58,76 @@ export function createApp() {
     });
   }
 
+  // CORS configuration - restrict to allowed origins in production
+  const allowedOrigins = env.ALLOWED_ORIGINS
+    ? env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
+    : (process.env.NODE_ENV === 'production' ? [] : true); // Allow all in dev, none in prod by default
+
   app.use(
     cors({
-      origin: true
+      origin: allowedOrigins,
+      credentials: true,
+      optionsSuccessStatus: 200
     })
   );
   app.use(express.json({ limit: '1mb' }));
+
+  // Rate limiting configuration
+  // General API rate limiter (for unauthenticated endpoints)
+  const generalLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // 100 requests per window per IP
+    message: 'Too many requests from this IP, please try again later.',
+    standardHeaders: true, // Return rate limit info in `RateLimit-*` headers
+    legacyHeaders: false, // Disable `X-RateLimit-*` headers
+    handler: (req: Request, res: Response) => {
+      logger.warn({
+        ip: req.ip,
+        path: req.path,
+        method: req.method
+      }, 'Rate limit exceeded');
+      res.status(429).json({
+        message: 'Too many requests, please try again later.',
+        retryAfter: Math.ceil(15 * 60) // seconds
+      });
+    }
+  });
+
+  // Search/Assistant rate limiter (stricter for authenticated users)
+  const searchLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // 100 requests per window per user
+    message: 'Too many search requests, please try again later.',
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req: Request) => {
+      // Use user ID if authenticated, otherwise fall back to IP
+      const authReq = req as AuthenticatedRequest;
+      return authReq.auth?.userId || req.ip || 'unknown';
+    },
+    handler: (req: Request, res: Response) => {
+      const authReq = req as AuthenticatedRequest;
+      const userId = authReq.auth?.userId || req.ip;
+      logger.warn({
+        userId,
+        ip: req.ip,
+        path: req.path,
+        method: req.method
+      }, 'Search rate limit exceeded');
+      res.status(429).json({
+        message: 'Too many search requests, please try again later.',
+        retryAfter: Math.ceil(15 * 60) // seconds
+      });
+    }
+  });
+
+  // Skills rate limiter (for internal/skill endpoints)
+  const skillsLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 200, // 200 requests per window (more lenient for internal use)
+    standardHeaders: true,
+    legacyHeaders: false
+  });
   app.use('/documents/styles', express.static(assetsDir));
 
   app.get('/health', (_req: Request, res: Response) => {
@@ -98,7 +164,7 @@ export function createApp() {
     }
   });
 
-  app.post('/skills/run', async (req: Request, res: Response, next: NextFunction) => {
+  app.post('/skills/run', skillsLimiter, async (req: Request, res: Response, next: NextFunction) => {
     try {
       const output = await timeOperation(
         'skills_run',
@@ -127,7 +193,7 @@ export function createApp() {
     }
   });
 
-  app.post('/assistant/run', requireSupabaseAuth, async (req: Request, res: Response, next: NextFunction) => {
+  app.post('/assistant/run', requireSupabaseAuth, searchLimiter, async (req: Request, res: Response, next: NextFunction) => {
     try {
       // Log request details for debugging
       logger.info({
@@ -311,7 +377,7 @@ export function createApp() {
     });
   });
 
-  app.get('/session', requireSupabaseAuth, async (req: Request, res: Response, next: NextFunction) => {
+  app.get('/session', requireSupabaseAuth, generalLimiter, async (req: Request, res: Response, next: NextFunction) => {
     try {
       const authReq = req as AuthenticatedRequest;
       const userId = authReq.auth?.userId;
@@ -348,7 +414,7 @@ export function createApp() {
     }
   });
 
-  app.get('/documents/xml', async (req: Request, res: Response, next: NextFunction) => {
+  app.get('/documents/xml', generalLimiter, async (req: Request, res: Response, next: NextFunction) => {
     try {
       // Log incoming request for debugging
       logger.info({ 
