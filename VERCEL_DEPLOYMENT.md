@@ -61,9 +61,15 @@ LANGSMITH_ENDPOINT=https://api.smith.langchain.com
 
 ```
 VITE_API_URL=/api
+VITE_SITE_URL=https://your-app.vercel.app
 VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_ANON_KEY=your-anon-key
 ```
+
+**Note:**
+- `VITE_SITE_URL` should be set to your production Vercel deployment URL (e.g., `https://your-app.vercel.app`)
+- This ensures magic links and password reset emails use the correct production URL instead of localhost
+- This variable is embedded at build time, so set it before deploying
 
 **Note:** 
 - `VITE_API_URL` should be set to `/api` (relative path) in production

@@ -228,10 +228,12 @@ function App() {
       setAuthStatus('Supabase er ikke konfigurert.');
       return;
     }
+    // Use VITE_SITE_URL if set (for production), otherwise fall back to window.location.origin
+    const redirectUrl = import.meta.env.VITE_SITE_URL || window.location.origin;
     const { error } = await supabase.auth.signInWithOtp({
       email: authEmail,
       options: {
-        emailRedirectTo: window.location.origin
+        emailRedirectTo: redirectUrl
       }
     });
     if (error) {
@@ -278,8 +280,10 @@ function App() {
       setAuthStatus('Supabase er ikke konfigurert.');
       return;
     }
+    // Use VITE_SITE_URL if set (for production), otherwise fall back to window.location.origin
+    const redirectUrl = import.meta.env.VITE_SITE_URL || window.location.origin;
     const { error } = await supabase.auth.resetPasswordForEmail(authEmail, {
-      redirectTo: window.location.origin
+      redirectTo: redirectUrl
     });
     if (error) {
       setAuthStatus(error.message);
