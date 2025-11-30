@@ -351,10 +351,24 @@ class ApiService {
       throw new Error('Authentication token is required');
     }
 
-    const response = await fetch(`${this.baseUrl}/gdpr/consent`, {
+    const url = `${this.baseUrl}/gdpr/consent`;
+    console.log('[Frontend] Fetching GDPR consent:', {
+      url,
+      baseUrl: this.baseUrl,
+      hasToken: !!token
+    });
+
+    const response = await fetch(url, {
       headers: {
         Authorization: `Bearer ${token}`
       }
+    });
+
+    console.log('[Frontend] GDPR consent fetch response:', {
+      status: response.status,
+      statusText: response.statusText,
+      ok: response.ok,
+      url: response.url
     });
 
     if (!response.ok) {
@@ -362,8 +376,15 @@ class ApiService {
       try {
         const errorData = await this.parseErrorResponse(response);
         errorMessage = errorData.message || errorData.detail || errorMessage;
+        
+        if (response.status === 404) {
+          errorMessage = `API-endepunkt ikke funnet: ${url}. Sjekk at backend-serveren kjører og at ruten /gdpr/consent er registrert.`;
+        }
       } catch {
-        // If parsing fails, use default message
+        // If parsing fails, use status-based message
+        if (response.status === 404) {
+          errorMessage = `API-endepunkt ikke funnet: ${url}. Sjekk at backend-serveren kjører.`;
+        }
       }
       throw new Error(errorMessage);
     }
@@ -376,13 +397,28 @@ class ApiService {
       throw new Error('Authentication token is required');
     }
 
-    const response = await fetch(`${this.baseUrl}/gdpr/consent`, {
+    const url = `${this.baseUrl}/gdpr/consent`;
+    console.log('[Frontend] Saving GDPR consent:', {
+      url,
+      baseUrl: this.baseUrl,
+      hasPayload: !!payload,
+      hasToken: !!token
+    });
+
+    const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`
       },
       body: JSON.stringify(payload)
+    });
+
+    console.log('[Frontend] GDPR consent response:', {
+      status: response.status,
+      statusText: response.statusText,
+      ok: response.ok,
+      url: response.url
     });
 
     if (!response.ok) {
@@ -395,7 +431,8 @@ class ApiService {
         
         // Provide more specific error messages
         if (response.status === 404) {
-          errorMessage = 'API-endepunkt ikke funnet. Sjekk at backend-serveren kjører.';
+          errorMessage = `API-endepunkt ikke funnet: ${url}. Sjekk at backend-serveren kjører og at ruten /gdpr/consent er registrert.`;
+          errorHint = 'Dette kan skyldes at backend-serveren ikke er startet eller at ruten ikke er registrert.';
         } else if (response.status === 401) {
           errorMessage = 'Du må være innlogget for å gi samtykke.';
         } else if (response.status === 400) {
@@ -406,7 +443,9 @@ class ApiService {
         }
       } catch {
         // If parsing fails, use status-based message
-        if (response.status === 500) {
+        if (response.status === 404) {
+          errorMessage = `API-endepunkt ikke funnet: ${url}. Sjekk at backend-serveren kjører.`;
+        } else if (response.status === 500) {
           errorMessage = 'Serverfeil. Dette kan skyldes at databasetabellen ikke er opprettet.';
           errorHint = 'Kontroller at migrasjonen add_gdpr_consent.sql er kjørt i Supabase.';
         }

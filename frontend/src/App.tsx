@@ -111,7 +111,12 @@ function App() {
       .catch((err) => {
         console.error('Failed to check GDPR consent:', err);
         if (!cancelled) {
-          // If error, assume no consent to be safe
+          // If 404, the endpoint might not exist yet - treat as no consent
+          // For other errors, also assume no consent to be safe
+          const errorMessage = err instanceof Error ? err.message : String(err);
+          if (errorMessage.includes('404') || errorMessage.includes('ikke funnet')) {
+            console.warn('GDPR consent endpoint not found - assuming no consent. This is normal if the migration has not been run yet.');
+          }
           setHasGDPRConsent(false);
           setCheckingConsent(false);
         }
