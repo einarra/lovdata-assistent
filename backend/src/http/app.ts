@@ -53,10 +53,11 @@ export function createApp() {
   const assetsDir = path.join(currentDir, '..', '..', 'public');
   
   // Trust proxy for Vercel and other proxy environments
+  // Set to 1 to trust only the first proxy (Vercel's edge) - this prevents IP spoofing
   // This is required for express-rate-limit to correctly identify client IPs
   if (process.env.VERCEL || process.env.TRUST_PROXY === 'true') {
-    app.set('trust proxy', true);
-    logger.info('Trust proxy enabled for Vercel/proxy environment');
+    app.set('trust proxy', 1); // Trust only the first proxy (Vercel edge)
+    logger.info('Trust proxy enabled for Vercel/proxy environment (trusting first proxy only)');
   }
   
   // Log registered routes for debugging (in serverless environments)
