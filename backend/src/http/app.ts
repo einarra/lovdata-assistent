@@ -910,18 +910,29 @@ export function createApp() {
 
   // 404 handler for unmatched routes - must be after all other routes
   app.use((req: Request, res: Response) => {
+    // Log all available routes for debugging
+    const availableRoutes: string[] = [];
+    app._router?.stack?.forEach((middleware: any) => {
+      if (middleware.route) {
+        const methods = Object.keys(middleware.route.methods).join(',').toUpperCase();
+        availableRoutes.push(`${methods} ${middleware.route.path}`);
+      }
+    });
+    
     logger.warn({
       path: req.path,
       method: req.method,
       url: req.url,
       originalUrl: req.originalUrl,
-      query: req.query
+      query: req.query,
+      availableRoutes: availableRoutes.filter(r => r.includes('gdpr') || r.includes(req.path.split('/')[1] || ''))
     }, '404: Route not found');
     res.status(404).json({
       message: 'Route not found',
       path: req.path,
       method: req.method,
-      hint: 'Check that the route is registered and the path matches exactly'
+      hint: 'Check that the route is registered and the path matches exactly',
+      availableRoutes: availableRoutes.slice(0, 20) // Show first 20 routes for debugging
     });
   });
 
