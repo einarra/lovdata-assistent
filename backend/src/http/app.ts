@@ -111,40 +111,76 @@ export function createApp() {
   });
 
   // Search/Assistant rate limiter (stricter for authenticated users)
-  const searchLimiter = rateLimit({
+  // Create separate limiters for authenticated vs anonymous users to avoid IPv6 validation issues
+  const authenticatedLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
     max: 100, // 100 requests per window per user
     message: 'Too many search requests, please try again later.',
     standardHeaders: true,
     legacyHeaders: false,
     keyGenerator: (req: Request) => {
-      // Use user ID if authenticated, otherwise use IP address
-      // With trust proxy enabled, req.ip will correctly handle IPv6 addresses
       const authReq = req as AuthenticatedRequest;
-      if (authReq.auth?.userId) {
-        return authReq.auth.userId;
-      }
-      // req.ip is safe to use here because we've set trust proxy
-      // express-rate-limit will handle IPv6 normalization internally
-      const ip = req.ip || req.socket.remoteAddress || 'unknown';
-      // Normalize IPv6 addresses (remove brackets if present, handle IPv4-mapped IPv6)
-      return ip.replace(/^::ffff:/, '').replace(/^\[|\]$/g, '');
+      return `user:${authReq.auth?.userId || 'unknown'}`;
     },
-    handler: (req: Request, res: Response) => {
+    skip: (req: Request) => {
+      // Skip this limiter for non-authenticated requests
       const authReq = req as AuthenticatedRequest;
-      const userId = authReq.auth?.userId || req.ip;
-      logger.warn({
-        userId,
-        ip: req.ip,
-        path: req.path,
-        method: req.method
-      }, 'Search rate limit exceeded');
-      res.status(429).json({
-        message: 'Too many search requests, please try again later.',
-        retryAfter: Math.ceil(15 * 60) // seconds
-      });
+      return !authReq.auth?.userId;
     }
   });
+
+  const anonymousLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // 100 requests per window per IP
+    message: 'Too many search requests, please try again later.',
+    standardHeaders: true,
+    legacyHeaders: false,
+    // Use socket.remoteAddress instead of req.ip to avoid IPv6 validation
+    // This works because trust proxy is set to 1
+    keyGenerator: (req: Request) => {
+      const socket = (req as any).socket;
+      const remoteAddress = socket?.remoteAddress;
+      if (remoteAddress) {
+        // Normalize IPv6 addresses
+        return remoteAddress.replace(/^::ffff:/, '').replace(/^\[|\]$/g, '');
+      }
+      return 'unknown';
+    },
+    skip: (req: Request) => {
+      // Skip this limiter for authenticated requests
+      const authReq = req as AuthenticatedRequest;
+      return !!authReq.auth?.userId;
+    }
+  });
+
+  // Combined limiter that applies both
+  const searchLimiter = (req: Request, res: Response, next: NextFunction) => {
+    const authReq = req as AuthenticatedRequest;
+    if (authReq.auth?.userId) {
+      return authenticatedLimiter(req, res, next);
+    } else {
+      return anonymousLimiter(req, res, next);
+    }
+  };
+  // Handler for rate limit exceeded
+  const searchLimiterHandler = (req: Request, res: Response) => {
+    const authReq = req as AuthenticatedRequest;
+    const userId = authReq.auth?.userId || req.ip;
+    logger.warn({
+      userId,
+      ip: req.ip,
+      path: req.path,
+      method: req.method
+    }, 'Search rate limit exceeded');
+    res.status(429).json({
+      message: 'Too many search requests, please try again later.',
+      retryAfter: Math.ceil(15 * 60) // seconds
+    });
+  };
+
+  // Set handlers for both limiters
+  authenticatedLimiter.handler = searchLimiterHandler;
+  anonymousLimiter.handler = searchLimiterHandler;
 
   // Skills rate limiter (for internal/skill endpoints)
   const skillsLimiter = rateLimit({
