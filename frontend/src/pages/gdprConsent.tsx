@@ -65,10 +65,15 @@ export function GDPRConsentForm({ onSubmit, onCancel, isLoading = false }: GDPRC
             <h3>Hvilke data samler vi inn?</h3>
             <ul className="gdpr-list">
               <li>E-postadresse (for autentisering og kommunikasjon)</li>
-              <li>Bruksdata (spørsmål du stiller, søkehistorikk)</li>
+              <li>Spørsmål du stiller (logges for debugging og feilsøking, ikke lagret i database)</li>
               <li>Teknisk informasjon (IP-adresse, nettlesertype, enhetsinformasjon)</li>
               <li>Abonnementsinformasjon (hvis du har aktivt abonnement)</li>
             </ul>
+            <p className="gdpr-note">
+              <strong>Viktig:</strong> Vi lagrer ikke chat-historikk eller søkehistorikk i vår database. 
+              Spørsmål du stiller logges kun for operasjonelle formål (feilsøking og forbedring av tjenesten) 
+              og sendes til OpenAI for behandling. Se vår personvernpolicy for mer informasjon om loggretensjon.
+            </p>
           </div>
 
           <div className="gdpr-section">
@@ -78,7 +83,14 @@ export function GDPRConsentForm({ onSubmit, onCancel, isLoading = false }: GDPRC
               <li>For å håndtere autentisering og sikkerhet</li>
               <li>For å oppfylle juridiske forpliktelser</li>
               <li>For å kommunisere med deg om tjenesten</li>
+              <li>For feilsøking og operasjonell overvåking (spørsmål logges)</li>
             </ul>
+            <p className="gdpr-note">
+              <strong>Data deling med tredjeparter:</strong> Spørsmål du stiller sendes til OpenAI for 
+              behandling og generering av svar. OpenAI kan beholde data i henhold til deres 
+              personvernpolicy. Vi anbefaler at du gjennomgår OpenAI sine innstillinger for 
+              databehandling hvis du har bekymringer.
+            </p>
           </div>
 
           <div className="gdpr-section">

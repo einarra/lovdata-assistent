@@ -19,8 +19,15 @@
 - Archive cache (`backend/data/archives/`) stores public documents for performance.  
   - Periodically purge unused archives.  
   - Do not store user-specific data alongside archives.  
-- Logs: avoid storing full responses/questions in prod logs; consider redaction strategy.  
-- No persistent storage of user conversations beyond in-memory state unless explicitly added with consent.
+- **Application Logs**: 
+  - User questions ARE logged via `logger.info({ question, ... })` in `backend/src/services/assistant.ts`
+  - Logs may be written to files if `LOG_FILE` environment variable is set
+  - **Recommendation**: Implement log retention policy (e.g., 30-90 days) and consider redacting sensitive information in production
+  - **Current Status**: Full questions are logged - consider redaction strategy for production
+- **Chat History**: No persistent storage of user conversations in database
+  - Messages stored only in frontend React state (in-memory, cleared on refresh)
+  - No localStorage, sessionStorage, or database storage of chat history
+- **User Queries**: Not stored in database, only logged for operational purposes
 
 ## Operational Steps
 
