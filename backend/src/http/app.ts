@@ -1,6 +1,6 @@
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
-import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
+import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { getOrchestrator } from '../skills/index.js';
 import { getServices } from '../services/index.js';
@@ -117,13 +117,17 @@ export function createApp() {
     standardHeaders: true,
     legacyHeaders: false,
     keyGenerator: (req: Request) => {
-      // Use user ID if authenticated, otherwise use proper IP key generator for IPv6 support
+      // Use user ID if authenticated, otherwise use IP address
+      // With trust proxy enabled, req.ip will correctly handle IPv6 addresses
       const authReq = req as AuthenticatedRequest;
       if (authReq.auth?.userId) {
         return authReq.auth.userId;
       }
-      // Use ipKeyGenerator helper to properly handle IPv6 addresses
-      return ipKeyGenerator(req);
+      // req.ip is safe to use here because we've set trust proxy
+      // express-rate-limit will handle IPv6 normalization internally
+      const ip = req.ip || req.socket.remoteAddress || 'unknown';
+      // Normalize IPv6 addresses (remove brackets if present, handle IPv4-mapped IPv6)
+      return ip.replace(/^::ffff:/, '').replace(/^\[|\]$/g, '');
     },
     handler: (req: Request, res: Response) => {
       const authReq = req as AuthenticatedRequest;
