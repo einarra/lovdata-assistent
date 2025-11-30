@@ -110,6 +110,22 @@ export function createApp() {
     }
   });
 
+  // Handler for rate limit exceeded (shared by both limiters)
+  const searchLimiterHandler = (req: Request, res: Response) => {
+    const authReq = req as AuthenticatedRequest;
+    const userId = authReq.auth?.userId || req.ip;
+    logger.warn({
+      userId,
+      ip: req.ip,
+      path: req.path,
+      method: req.method
+    }, 'Search rate limit exceeded');
+    res.status(429).json({
+      message: 'Too many search requests, please try again later.',
+      retryAfter: Math.ceil(15 * 60) // seconds
+    });
+  };
+
   // Search/Assistant rate limiter (stricter for authenticated users)
   // Create separate limiters for authenticated vs anonymous users to avoid IPv6 validation issues
   const authenticatedLimiter = rateLimit({
@@ -122,6 +138,7 @@ export function createApp() {
       const authReq = req as AuthenticatedRequest;
       return `user:${authReq.auth?.userId || 'unknown'}`;
     },
+    handler: searchLimiterHandler,
     skip: (req: Request) => {
       // Skip this limiter for non-authenticated requests
       const authReq = req as AuthenticatedRequest;
@@ -146,6 +163,7 @@ export function createApp() {
       }
       return 'unknown';
     },
+    handler: searchLimiterHandler,
     skip: (req: Request) => {
       // Skip this limiter for authenticated requests
       const authReq = req as AuthenticatedRequest;
@@ -162,25 +180,6 @@ export function createApp() {
       return anonymousLimiter(req, res, next);
     }
   };
-  // Handler for rate limit exceeded
-  const searchLimiterHandler = (req: Request, res: Response) => {
-    const authReq = req as AuthenticatedRequest;
-    const userId = authReq.auth?.userId || req.ip;
-    logger.warn({
-      userId,
-      ip: req.ip,
-      path: req.path,
-      method: req.method
-    }, 'Search rate limit exceeded');
-    res.status(429).json({
-      message: 'Too many search requests, please try again later.',
-      retryAfter: Math.ceil(15 * 60) // seconds
-    });
-  };
-
-  // Set handlers for both limiters
-  authenticatedLimiter.handler = searchLimiterHandler;
-  anonymousLimiter.handler = searchLimiterHandler;
 
   // Skills rate limiter (for internal/skill endpoints)
   const skillsLimiter = rateLimit({
