@@ -531,8 +531,29 @@ export function createApp() {
         .single();
 
       if (error) {
-        logger.error({ err: error, userId }, 'Failed to save GDPR consent');
-        res.status(500).json({ message: 'Failed to save consent record' });
+        logger.error({ err: error, userId, errorCode: error.code, errorMessage: error.message }, 'Failed to save GDPR consent');
+        
+        // Provide more helpful error messages
+        let errorMessage = 'Failed to save consent record';
+        let hint: string | undefined;
+        
+        if (error.code === '42P01') {
+          // Table doesn't exist
+          errorMessage = 'Database table not found';
+          hint = 'The gdpr_consents table does not exist. Please run the migration add_gdpr_consent.sql in Supabase.';
+        } else if (error.code === '23505') {
+          // Unique constraint violation (shouldn't happen with upsert, but handle it)
+          errorMessage = 'Consent record already exists';
+          hint = 'A consent record for this user already exists.';
+        } else if (error.message) {
+          errorMessage = error.message;
+        }
+        
+        res.status(500).json({ 
+          message: errorMessage,
+          hint,
+          errorCode: error.code
+        });
         return;
       }
 

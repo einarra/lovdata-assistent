@@ -387,13 +387,33 @@ class ApiService {
 
     if (!response.ok) {
       let errorMessage = 'Kunne ikke lagre samtykke';
+      let errorHint: string | undefined;
       try {
         const errorData = await this.parseErrorResponse(response);
         errorMessage = errorData.message || errorData.detail || errorMessage;
+        errorHint = errorData.hint;
+        
+        // Provide more specific error messages
+        if (response.status === 404) {
+          errorMessage = 'API-endepunkt ikke funnet. Sjekk at backend-serveren kjører.';
+        } else if (response.status === 401) {
+          errorMessage = 'Du må være innlogget for å gi samtykke.';
+        } else if (response.status === 400) {
+          errorMessage = errorData.message || 'Ugyldig data. ' + (errorData.hint || '');
+        } else if (response.status === 500) {
+          errorMessage = 'Serverfeil. Dette kan skyldes at databasetabellen ikke er opprettet. ' + (errorData.message || '');
+          errorHint = 'Kontroller at migrasjonen add_gdpr_consent.sql er kjørt i Supabase.';
+        }
       } catch {
-        // If parsing fails, use default message
+        // If parsing fails, use status-based message
+        if (response.status === 500) {
+          errorMessage = 'Serverfeil. Dette kan skyldes at databasetabellen ikke er opprettet.';
+          errorHint = 'Kontroller at migrasjonen add_gdpr_consent.sql er kjørt i Supabase.';
+        }
       }
-      throw new Error(errorMessage);
+      
+      const fullError = errorHint ? `${errorMessage}. ${errorHint}` : errorMessage;
+      throw new Error(fullError);
     }
 
     return this.parseJsonResponse<GDPRConsentResponse>(response);
