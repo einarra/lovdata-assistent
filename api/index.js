@@ -84,12 +84,19 @@ export const config = {
 
 // Export the handler for Vercel
 export default async function handler(req, res) {
-  // Only log request in development
-  if (process.env.NODE_ENV === 'development') {
+  // Always log GDPR routes for debugging
+  const url = req.url || req.path || '';
+  const isGdprRoute = url.includes('gdpr');
+  const shouldLog = process.env.NODE_ENV === 'development' || process.env.VERCEL || isGdprRoute;
+  
+  if (shouldLog) {
     console.log('[API/index.js] Entry point:', {
       method: req.method,
       url: req.url,
-      path: req.path
+      path: req.path,
+      originalUrl: req.originalUrl,
+      query: req.query,
+      isGdprRoute
     });
   }
 
@@ -162,7 +169,9 @@ export default async function handler(req, res) {
     }
 
     // Debug logging in development and Vercel
-    if (process.env.NODE_ENV === 'development' || process.env.VERCEL) {
+    // Always log GDPR routes for debugging
+    const shouldLog = process.env.NODE_ENV === 'development' || process.env.VERCEL || path.includes('gdpr');
+    if (shouldLog) {
       console.log('[API] Path reconstruction:', {
         originalUrl: req.originalUrl,
         url: req.url,

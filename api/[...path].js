@@ -13,19 +13,23 @@ export const config = {
 // Export handler that reconstructs the path from Vercel's path parameter
 export default async function catchAllHandler(req, res) {
   // Log EVERY request at the entry point - this is critical for debugging
-  console.log('[API/[...path].js] Catch-all entry point:', {
-    method: req.method,
-    url: req.url,
-    path: req.path,
-    originalUrl: req.originalUrl,
-    query: req.query,
-    '...path': req.query['...path'],
-    headers: {
-      'content-type': req.headers['content-type'],
-      'authorization': req.headers.authorization ? 'present' : 'missing',
-      'x-http-method-override': req.headers['x-http-method-override']
-    }
-  });
+  // Always log in Vercel environment to debug routing issues
+  const shouldLog = process.env.VERCEL || process.env.NODE_ENV === 'development';
+  if (shouldLog) {
+    console.log('[API/[...path].js] Catch-all entry point:', {
+      method: req.method,
+      url: req.url,
+      path: req.path,
+      originalUrl: req.originalUrl,
+      query: req.query,
+      '...path': req.query['...path'],
+      headers: {
+        'content-type': req.headers['content-type'],
+        'authorization': req.headers.authorization ? 'present' : 'missing',
+        'x-http-method-override': req.headers['x-http-method-override']
+      }
+    });
+  }
   
   // Log the incoming request method for debugging
   const incomingMethod = req.method || req.headers['x-http-method-override'] || 'UNKNOWN';
