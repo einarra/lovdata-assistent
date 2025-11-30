@@ -33,6 +33,15 @@ const assistantSchema = z.object({
   locale: z.string().optional()
 });
 
+const gdprConsentSchema = z.object({
+  dataProcessing: z.boolean(),
+  dataStorage: z.boolean(),
+  dataSharing: z.boolean().optional(),
+  marketing: z.boolean().optional(),
+  consentDate: z.string().optional(),
+  userAgent: z.string().optional()
+});
+
 const readXmlSchema = z.object({
   filename: z.coerce.string().min(1, 'filename is required'),
   member: z.coerce.string().min(1, 'member is required')
@@ -407,6 +416,140 @@ export function createApp() {
           status: 'free',
           plan: 'Supabase',
           lastSyncedAt: new Date().toISOString()
+        }
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // GDPR Consent endpoints
+  app.get('/gdpr/consent', requireSupabaseAuth, generalLimiter, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const authReq = req as AuthenticatedRequest;
+      const userId = authReq.auth?.userId;
+
+      if (!userId) {
+        res.status(401).json({ message: 'Unauthorized' });
+        return;
+      }
+
+      const supabase = getSupabaseAdminClient();
+      const { data, error } = await supabase
+        .from('gdpr_consents')
+        .select('*')
+        .eq('user_id', userId)
+        .single();
+
+      if (error) {
+        // If no consent found, return null (not an error)
+        if (error.code === 'PGRST116') {
+          res.json({ consent: null });
+          return;
+        }
+        logger.error({ err: error, userId }, 'Failed to fetch GDPR consent');
+        res.status(500).json({ message: 'Failed to fetch consent record' });
+        return;
+      }
+
+      res.json({
+        consent: {
+          id: data.id,
+          dataProcessing: data.data_processing,
+          dataStorage: data.data_storage,
+          dataSharing: data.data_sharing,
+          marketing: data.marketing,
+          consentDate: data.consent_date,
+          version: data.version,
+          createdAt: data.created_at,
+          updatedAt: data.updated_at
+        }
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post('/gdpr/consent', requireSupabaseAuth, generalLimiter, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const authReq = req as AuthenticatedRequest;
+      const userId = authReq.auth?.userId;
+
+      if (!userId) {
+        res.status(401).json({ message: 'Unauthorized' });
+        return;
+      }
+
+      // Validate payload
+      let payload;
+      try {
+        payload = gdprConsentSchema.parse(req.body);
+      } catch (parseError) {
+        if (parseError instanceof z.ZodError) {
+          res.status(400).json({
+            message: 'Invalid consent data',
+            issues: parseError.issues.map(issue => ({
+              path: issue.path.join('.'),
+              message: issue.message
+            }))
+          });
+          return;
+        }
+        throw parseError;
+      }
+
+      // GDPR requires explicit consent for data processing and storage
+      if (!payload.dataProcessing || !payload.dataStorage) {
+        res.status(400).json({
+          message: 'Data processing and storage consent are required',
+          hint: 'Both dataProcessing and dataStorage must be true to use the service'
+        });
+        return;
+      }
+
+      const supabase = getSupabaseAdminClient();
+      const ipAddress = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || null;
+      const ipString = Array.isArray(ipAddress) ? ipAddress[0] : ipAddress;
+
+      // Upsert consent record (insert or update if exists)
+      const { data, error } = await supabase
+        .from('gdpr_consents')
+        .upsert({
+          user_id: userId,
+          data_processing: payload.dataProcessing,
+          data_storage: payload.dataStorage,
+          data_sharing: payload.dataSharing ?? false,
+          marketing: payload.marketing ?? false,
+          consent_date: payload.consentDate ? new Date(payload.consentDate).toISOString() : new Date().toISOString(),
+          ip_address: ipString,
+          user_agent: payload.userAgent,
+          version: '1.0'
+        }, {
+          onConflict: 'user_id'
+        })
+        .select()
+        .single();
+
+      if (error) {
+        logger.error({ err: error, userId }, 'Failed to save GDPR consent');
+        res.status(500).json({ message: 'Failed to save consent record' });
+        return;
+      }
+
+      logger.info({ userId, consentId: data.id }, 'GDPR consent saved successfully');
+
+      res.json({
+        success: true,
+        consent: {
+          id: data.id,
+          dataProcessing: data.data_processing,
+          dataStorage: data.data_storage,
+          dataSharing: data.data_sharing,
+          marketing: data.marketing,
+          consentDate: data.consent_date,
+          version: data.version,
+          createdAt: data.created_at,
+          updatedAt: data.updated_at
         }
       });
     } catch (error) {

@@ -82,6 +82,29 @@ export interface SessionInfo {
   } | null;
 }
 
+export interface GDPRConsentResponse {
+  consent: {
+    id: number;
+    dataProcessing: boolean;
+    dataStorage: boolean;
+    dataSharing: boolean;
+    marketing: boolean;
+    consentDate: string;
+    version: string;
+    createdAt: string;
+    updatedAt: string;
+  } | null;
+}
+
+export interface GDPRConsentRequest {
+  dataProcessing: boolean;
+  dataStorage: boolean;
+  dataSharing?: boolean;
+  marketing?: boolean;
+  consentDate?: string;
+  userAgent?: string;
+}
+
 class ApiService {
   private readonly baseUrl: string;
 
@@ -321,6 +344,59 @@ class ApiService {
       throw new Error(errorMessage);
     }
     return this.parseJsonResponse<SessionInfo>(response);
+  }
+
+  async fetchGDPRConsent(token: string): Promise<GDPRConsentResponse> {
+    if (!token) {
+      throw new Error('Authentication token is required');
+    }
+
+    const response = await fetch(`${this.baseUrl}/gdpr/consent`, {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    });
+
+    if (!response.ok) {
+      let errorMessage = 'Kunne ikke hente samtykkeinformasjon';
+      try {
+        const errorData = await this.parseErrorResponse(response);
+        errorMessage = errorData.message || errorData.detail || errorMessage;
+      } catch {
+        // If parsing fails, use default message
+      }
+      throw new Error(errorMessage);
+    }
+
+    return this.parseJsonResponse<GDPRConsentResponse>(response);
+  }
+
+  async saveGDPRConsent(payload: GDPRConsentRequest, token: string): Promise<GDPRConsentResponse> {
+    if (!token) {
+      throw new Error('Authentication token is required');
+    }
+
+    const response = await fetch(`${this.baseUrl}/gdpr/consent`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      let errorMessage = 'Kunne ikke lagre samtykke';
+      try {
+        const errorData = await this.parseErrorResponse(response);
+        errorMessage = errorData.message || errorData.detail || errorMessage;
+      } catch {
+        // If parsing fails, use default message
+      }
+      throw new Error(errorMessage);
+    }
+
+    return this.parseJsonResponse<GDPRConsentResponse>(response);
   }
 }
 

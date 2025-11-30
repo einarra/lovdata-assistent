@@ -5,6 +5,7 @@ import type { Message } from './types/chat';
 import { apiService, type AssistantRunResponse, type SessionInfo } from './services/api';
 import { OmOss } from './pages/omOss';
 import { KontaktOss } from './pages/kontaktOss';
+import { GDPRConsentForm, type GDPRConsentData } from './pages/gdprConsent';
 import './App.css';
 import { supabase } from './lib/supabaseClient';
 import { useSupabaseSession } from './hooks/useSupabaseSession';
@@ -26,6 +27,9 @@ function App() {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordResetStatus, setPasswordResetStatus] = useState<string | null>(null);
+  const [hasGDPRConsent, setHasGDPRConsent] = useState<boolean | null>(null);
+  const [checkingConsent, setCheckingConsent] = useState(false);
+  const [savingConsent, setSavingConsent] = useState(false);
 
   const checkHealth = useCallback(async () => {
     try {
@@ -67,6 +71,7 @@ function App() {
     let cancelled = false;
     if (!accessToken) {
       setProfile(null);
+      setHasGDPRConsent(null);
       return;
     }
     apiService
@@ -79,6 +84,36 @@ function App() {
       .catch(() => {
         if (!cancelled) {
           setProfile(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken]);
+
+  // Check GDPR consent when user is logged in
+  useEffect(() => {
+    let cancelled = false;
+    if (!accessToken) {
+      setHasGDPRConsent(null);
+      return;
+    }
+
+    setCheckingConsent(true);
+    apiService
+      .fetchGDPRConsent(accessToken)
+      .then((response) => {
+        if (!cancelled) {
+          setHasGDPRConsent(response.consent !== null);
+          setCheckingConsent(false);
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to check GDPR consent:', err);
+        if (!cancelled) {
+          // If error, assume no consent to be safe
+          setHasGDPRConsent(false);
+          setCheckingConsent(false);
         }
       });
     return () => {
@@ -165,7 +200,7 @@ function App() {
     );
   }
 
-  if (sessionLoading) {
+  if (sessionLoading || (session && checkingConsent)) {
     return (
       <div className="app">
         <main className="app-main">
@@ -281,6 +316,31 @@ function App() {
     }
     await supabase.auth.signOut();
     setProfile(null);
+    setHasGDPRConsent(null);
+  };
+
+  const handleGDPRConsentSubmit = async (data: GDPRConsentData) => {
+    if (!accessToken) {
+      throw new Error('Du må være innlogget for å gi samtykke.');
+    }
+
+    setSavingConsent(true);
+    try {
+      await apiService.saveGDPRConsent(
+        {
+          dataProcessing: data.dataProcessing,
+          dataStorage: data.dataStorage,
+          dataSharing: data.dataSharing,
+          marketing: data.marketing,
+          consentDate: data.consentDate,
+          userAgent: data.userAgent,
+        },
+        accessToken
+      );
+      setHasGDPRConsent(true);
+    } finally {
+      setSavingConsent(false);
+    }
   };
 
   if (showPasswordReset) {
@@ -410,6 +470,25 @@ function App() {
             </form>
             {authStatus && <p className="auth-status">{authStatus}</p>}
           </div>
+        </main>
+      </div>
+    );
+  }
+
+  // Show GDPR consent form if user is logged in but hasn't given consent
+  if (session && hasGDPRConsent === false) {
+    return (
+      <div className="app">
+        <header className="app-header">
+          <div className="header-content">
+            <div className="header-info">
+              <h1>Lovdata Assistent</h1>
+              <p>Personvern og samtykke</p>
+            </div>
+          </div>
+        </header>
+        <main className="app-main scrollable">
+          <GDPRConsentForm onSubmit={handleGDPRConsentSubmit} isLoading={savingConsent} />
         </main>
       </div>
     );
