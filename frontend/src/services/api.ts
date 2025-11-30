@@ -355,20 +355,30 @@ class ApiService {
     console.log('[Frontend] Fetching GDPR consent:', {
       url,
       baseUrl: this.baseUrl,
-      hasToken: !!token
+      hasToken: !!token,
+      isProduction: import.meta.env.PROD,
+      viteApiUrl: import.meta.env.VITE_API_URL
     });
 
-    const response = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${token}`
-      }
-    });
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+    } catch (fetchError) {
+      console.error('[Frontend] GDPR consent fetch error:', fetchError);
+      throw new Error(`Network error: ${fetchError instanceof Error ? fetchError.message : String(fetchError)}`);
+    }
 
     console.log('[Frontend] GDPR consent fetch response:', {
       status: response.status,
       statusText: response.statusText,
       ok: response.ok,
-      url: response.url
+      url: response.url,
+      redirected: response.redirected,
+      type: response.type
     });
 
     if (!response.ok) {

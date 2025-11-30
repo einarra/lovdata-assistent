@@ -71,7 +71,14 @@ export function createApp() {
           routes.push(`${methods} ${middleware.route.path}`);
         }
       });
-      logger.info({ routes }, 'Registered Express routes');
+      const gdprRoutes = routes.filter(r => r.includes('gdpr'));
+      logger.info({ 
+        routes, 
+        totalRoutes: routes.length,
+        gdprRoutes,
+        hasGdprConsentGet: routes.some(r => r.includes('GET') && r.includes('/gdpr/consent')),
+        hasGdprConsentPost: routes.some(r => r.includes('POST') && r.includes('/gdpr/consent'))
+      }, 'Registered Express routes');
     });
   }
 
