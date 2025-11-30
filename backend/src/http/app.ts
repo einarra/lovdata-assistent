@@ -1,6 +1,6 @@
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { z } from 'zod';
 import { getOrchestrator } from '../skills/index.js';
 import { getServices } from '../services/index.js';
@@ -51,6 +51,13 @@ export function createApp() {
   const app = express();
   const currentDir = path.dirname(fileURLToPath(import.meta.url));
   const assetsDir = path.join(currentDir, '..', '..', 'public');
+  
+  // Trust proxy for Vercel and other proxy environments
+  // This is required for express-rate-limit to correctly identify client IPs
+  if (process.env.VERCEL || process.env.TRUST_PROXY === 'true') {
+    app.set('trust proxy', true);
+    logger.info('Trust proxy enabled for Vercel/proxy environment');
+  }
   
   // Log registered routes for debugging (in serverless environments)
   if (process.env.VERCEL || process.cwd().startsWith('/var/task')) {
@@ -110,9 +117,13 @@ export function createApp() {
     standardHeaders: true,
     legacyHeaders: false,
     keyGenerator: (req: Request) => {
-      // Use user ID if authenticated, otherwise fall back to IP
+      // Use user ID if authenticated, otherwise use proper IP key generator for IPv6 support
       const authReq = req as AuthenticatedRequest;
-      return authReq.auth?.userId || req.ip || 'unknown';
+      if (authReq.auth?.userId) {
+        return authReq.auth.userId;
+      }
+      // Use ipKeyGenerator helper to properly handle IPv6 addresses
+      return ipKeyGenerator(req);
     },
     handler: (req: Request, res: Response) => {
       const authReq = req as AuthenticatedRequest;
