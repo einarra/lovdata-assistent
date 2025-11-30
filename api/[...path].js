@@ -127,6 +127,20 @@ export default async function catchAllHandler(req, res) {
       authorization: req.headers.authorization ? 'present' : 'missing'
     });
   }
+
+  // Special logging for GDPR routes to help diagnose issues
+  if (path === '/gdpr/consent' || path.startsWith('/gdpr/')) {
+    console.log('[CatchAll] GDPR route request detected:', {
+      method: req.method,
+      path: path,
+      originalPath: pathParam,
+      hasBody: !!req.body,
+      contentType: req.headers['content-type'],
+      authorization: req.headers.authorization ? 'present' : 'missing',
+      url: req.url,
+      originalUrl: req.originalUrl
+    });
+  }
   
   // Don't delete query params here - let the main handler use them if needed
   // The main handler will use req.url which we've already set correctly

@@ -477,10 +477,12 @@ export function createApp() {
   // GDPR Consent endpoints
   app.get('/gdpr/consent', requireSupabaseAuth, generalLimiter, async (req: Request, res: Response, next: NextFunction) => {
     try {
+      logger.info({ path: req.path, method: req.method, url: req.url }, 'GDPR consent GET: request received');
       const authReq = req as AuthenticatedRequest;
       const userId = authReq.auth?.userId;
 
       if (!userId) {
+        logger.warn({ path: req.path }, 'GDPR consent GET: userId missing');
         res.status(401).json({ message: 'Unauthorized' });
         return;
       }
@@ -523,10 +525,12 @@ export function createApp() {
 
   app.post('/gdpr/consent', requireSupabaseAuth, generalLimiter, async (req: Request, res: Response, next: NextFunction) => {
     try {
+      logger.info({ path: req.path, method: req.method, url: req.url, hasBody: !!req.body }, 'GDPR consent POST: request received');
       const authReq = req as AuthenticatedRequest;
       const userId = authReq.auth?.userId;
 
       if (!userId) {
+        logger.warn({ path: req.path }, 'GDPR consent POST: userId missing');
         res.status(401).json({ message: 'Unauthorized' });
         return;
       }
@@ -902,6 +906,23 @@ export function createApp() {
       }, 'GET /documents/xml: unexpected error');
       next(error);
     }
+  });
+
+  // 404 handler for unmatched routes - must be after all other routes
+  app.use((req: Request, res: Response) => {
+    logger.warn({
+      path: req.path,
+      method: req.method,
+      url: req.url,
+      originalUrl: req.originalUrl,
+      query: req.query
+    }, '404: Route not found');
+    res.status(404).json({
+      message: 'Route not found',
+      path: req.path,
+      method: req.method,
+      hint: 'Check that the route is registered and the path matches exactly'
+    });
   });
 
   app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
