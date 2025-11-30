@@ -200,6 +200,11 @@ export function createApp() {
     });
   });
 
+  // Test endpoint to verify GDPR routes are accessible
+  app.get('/gdpr/test', (_req: Request, res: Response) => {
+    res.json({ message: 'GDPR routes are accessible', path: '/gdpr/test' });
+  });
+
   app.get('/ready', (_req: Request, res: Response) => {
     const services = getServices();
     if (!isReady() || !services.archive) {
