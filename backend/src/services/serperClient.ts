@@ -1,11 +1,21 @@
 import { env } from '../config/env.js';
 
+// Restricted URL patterns for agent use (only these patterns will be searched)
+export const AGENT_RESTRICTED_PATTERNS = [
+  '/avgjørelser/',
+  '/lovtidend/',
+  '/husleietvistutvalget/',
+  '/trygderetten/',
+  '/sph2025/'
+] as const;
+
 export type SerperSearchOptions = {
   num?: number;
   gl?: string;
   hl?: string;
   site?: string;
   targetDocuments?: boolean; // If true, prioritize document pages (lov, forskrift, dokument)
+  restrictedPatterns?: readonly string[]; // Specific URL patterns to search (overrides targetDocuments patterns when provided)
 };
 
 export type SerperResponse = {
@@ -39,9 +49,13 @@ export class SerperClient {
     if (options.site) {
       const normalizedSite = options.site.replace(/^https?:\/\//, '').replace(/\/$/, '');
       
-      // If targeting documents, use URL patterns to prioritize document pages
-      if (options.targetDocuments) {
-        // Target common Lovdata document URL patterns:
+      // Use restricted patterns if provided (for agent calls), otherwise use default targetDocuments logic
+      if (options.restrictedPatterns && options.restrictedPatterns.length > 0) {
+        // Agent-restricted patterns: only search in specific URL paths
+        const patternQueries = options.restrictedPatterns.map(pattern => `inurl:${pattern}`).join(' OR ');
+        siteQuery = `site:${normalizedSite} (${patternQueries}) `;
+      } else if (options.targetDocuments) {
+        // Target common Lovdata document URL patterns (default for non-agent calls):
         // - /dokument/ (document pages)
         // - /lov/ (laws)
         // - /forskrift/ (regulations)
@@ -174,9 +188,18 @@ export class SerperClient {
   /**
    * Search specifically for document pages on Lovdata.no
    * This targets URLs containing /dokument/, /lov/, /forskrift/, etc.
+   * If restrictedPatterns is provided, only those patterns will be used (overrides targetDocuments).
    */
   async searchDocuments(query: string, options: Omit<SerperSearchOptions, 'targetDocuments'> = {}): Promise<SerperResponse> {
-    return this.search(query, { ...options, targetDocuments: true });
+    // If restrictedPatterns is provided, use it (don't set targetDocuments)
+    // Otherwise, use targetDocuments: true for default behavior
+    const searchOptions: SerperSearchOptions = {
+      ...options
+    };
+    if (!options.restrictedPatterns) {
+      searchOptions.targetDocuments = true;
+    }
+    return this.search(query, searchOptions);
   }
 
   /**

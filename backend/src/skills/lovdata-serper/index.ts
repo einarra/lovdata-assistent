@@ -1,5 +1,5 @@
 import type { SkillContext, SkillIO, SkillOutput } from '../skills-core.js';
-import { SerperClient } from '../../services/serperClient.js';
+import { SerperClient, AGENT_RESTRICTED_PATTERNS } from '../../services/serperClient.js';
 import { env } from '../../config/env.js';
 import { logger } from '../../logger.js';
 
@@ -55,28 +55,46 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
     };
   }
 
-  logger.info({ query: input.query, site, targetDocuments: input.targetDocuments }, 'lovdata-serper: calling client.search');
+  // Check if this is an agent call (from context)
+  const isAgentCall = (ctx as any).agentCall === true;
+  
+  logger.info({ 
+    query: input.query, 
+    site, 
+    targetDocuments: input.targetDocuments,
+    isAgentCall 
+  }, 'lovdata-serper: calling client.search');
   
   let response;
   try {
     // Use document-targeted search if requested, or default to true for lovdata.no
     const shouldTargetDocuments = input.targetDocuments ?? (site === 'lovdata.no' || site?.includes('lovdata.no'));
     
-    if (shouldTargetDocuments) {
-      // Try document-specific search first
-      response = await client.searchDocuments(input.query, {
+    if (shouldTargetDocuments || isAgentCall) {
+      // For agent calls, use restricted patterns; otherwise use default document search
+      const searchOptions: Parameters<typeof client.searchDocuments>[1] = {
         num: input.num,
         gl: input.gl,
         hl: input.hl,
-        site
-      });
+        site: isAgentCall ? 'lovdata.no' : site, // Always lovdata.no for agent calls
+      };
+      
+      if (isAgentCall) {
+        // Agent calls: use restricted patterns only
+        searchOptions.restrictedPatterns = AGENT_RESTRICTED_PATTERNS;
+      }
+      
+      // Try document-specific search first
+      response = await client.searchDocuments(input.query, searchOptions);
       logger.info({ 
         hasOrganic: !!response.organic,
-        organicCount: Array.isArray(response.organic) ? response.organic.length : 0
+        organicCount: Array.isArray(response.organic) ? response.organic.length : 0,
+        isAgentCall,
+        usedRestrictedPatterns: isAgentCall
       }, 'lovdata-serper: client.searchDocuments completed');
       
-      // If we got few results, also try a general search and merge
-      if (!response.organic || response.organic.length < 3) {
+      // If we got few results, also try a general search and merge (but not for agent calls)
+      if (!isAgentCall && (!response.organic || response.organic.length < 3)) {
         logger.info('lovdata-serper: document search returned few results, trying general search');
         try {
           const generalResponse = await client.search(input.query, {

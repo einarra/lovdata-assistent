@@ -34,6 +34,8 @@ export async function searchLovdataPublicData(options: {
     lawType?: string | null;
     ministry?: string | null;
   };
+  queryEmbedding?: number[] | null; // Optional pre-computed query embedding to avoid regeneration
+  rrfK?: number; // Optional RRF k parameter
 }): Promise<LovdataSearchResult> {
   const { store, query } = options;
   const page = Math.max(1, options.page);
@@ -71,7 +73,9 @@ export async function searchLovdataPublicData(options: {
     result = await store.searchAsync(query, {
       limit: candidateLimit,
       offset: enableReranking ? 0 : offset, // Start from 0 when re-ranking, use offset otherwise
-      filters: options.filters
+      filters: options.filters,
+      queryEmbedding: options.queryEmbedding, // Pass through pre-computed embedding
+      rrfK: options.rrfK // Pass through RRF k parameter
     });
     logger.info({ 
       hitsCount: result.hits.length,

@@ -1,8 +1,9 @@
 import type { SkillContext, SkillIO, SkillOutput } from '../skills-core.js';
 import { LovdataClient } from '../../services/lovdataClient.js';
-import { SerperClient } from '../../services/serperClient.js';
 import { searchLovdataPublicData, type LovdataSearchResult } from '../../services/lovdataSearch.js';
 import type { SupabaseArchiveStore } from '../../storage/supabaseArchiveStore.js';
+import { EmbeddingService } from '../../services/embeddingService.js';
+import { logger } from '../../logger.js';
 
 type LovdataSkillInput =
   | { action: 'listPublicData' }
@@ -24,7 +25,6 @@ type LovdataSkillInput =
 type Services = {
   lovdata?: LovdataClient;
   archive?: SupabaseArchiveStore | null;
-  serper?: SerperClient;
 };
 
 export async function guard({ ctx, io }: { ctx: SkillContext; io: SkillIO }) {
@@ -76,52 +76,170 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
         throw new Error('Archive store is not available for Lovdata search');
       }
 
-      const searchResult: LovdataSearchResult = await searchLovdataPublicData({
-        store: archiveStore,
-        query: command.query,
-        page,
-        pageSize,
-        filters: command.filters
-      });
-
-      const hits = searchResult?.hits ?? [];
-      const searchedFiles = searchResult?.searchedFiles ?? [];
-      const totalHits = searchResult?.totalHits ?? 0;
-      const totalPages = searchResult?.totalPages ?? Math.max(1, Math.ceil(totalHits / pageSize));
-
-      let fallbackInfo:
-        | {
-            provider: string;
-            organic: Array<{
-              title: string | null;
-              link: string | null;
-              snippet: string | null;
-              date: string | null;
-            }>;
+      // Determine if we should use prioritized search (when lawType is not specified)
+      const usePrioritizedSearch = !command.filters?.lawType;
+      const defaultLawTypePriority = ['Lov', 'Forskrift', 'Vedtak', 'Instruks', 'Reglement', 'Vedlegg'] as const;
+      
+      let searchResult: LovdataSearchResult | null = null;
+      
+      if (usePrioritizedSearch) {
+        // Generate query embedding once to reuse across all searches (OPTIMIZATION)
+        let queryEmbedding: number[] | null = null;
+        try {
+          // Access embedding service from archive store if available
+          const embeddingService = (archiveStore as any).embeddingService as EmbeddingService | null;
+          if (embeddingService) {
+            queryEmbedding = await embeddingService.generateEmbedding(command.query);
+            logger.debug({ queryLength: command.query.length }, 'Generated query embedding for prioritized search');
           }
-        | undefined;
-
-      if (services.serper) {
-        const shouldFetchFallback =
-          hits.length === 0 ||
-          hits.length < Math.min(pageSize, 5) ||
-          totalHits === 0;
-        if (shouldFetchFallback) {
-          // Use document-targeted search to get direct links to Lovdata documents
-          const fallback = await services.serper.searchDocuments(command.query, { num: 10 });
-          // Prioritize document links in results
-          const prioritized = SerperClient.prioritizeDocumentLinks(fallback);
-          fallbackInfo = {
-            provider: 'serper',
-            organic: (prioritized.organic ?? []).map(item => ({
-              title: item.title ?? null,
-              link: item.link ?? null,
-              snippet: item.snippet ?? null,
-              date: item.date ?? null
-            }))
-          };
+        } catch (embeddingError) {
+          logger.warn({ err: embeddingError }, 'Failed to generate query embedding for prioritized search - will generate per search');
         }
+        
+        // Try each law type in priority order until we get sufficient results
+        const minResults = Math.max(3, Math.floor(pageSize * 0.5)); // Require at least 50% of requested results
+        let bestResult: LovdataSearchResult | null = null;
+        let searchedTypes: string[] = [];
+        let foundEnoughResults = false;
+        
+        // OPTIMIZATION: Search Lov + Forskrift in parallel (Option C)
+        // These are the two highest priority types, so search them together
+        const [lovResult, forskriftResult] = await Promise.all([
+          searchLovdataPublicData({
+            store: archiveStore,
+            query: command.query,
+            page,
+            pageSize,
+            enableReranking: false,
+            filters: {
+              ...command.filters,
+              lawType: 'Lov'
+            },
+            queryEmbedding // Reuse pre-computed embedding
+          }),
+          searchLovdataPublicData({
+            store: archiveStore,
+            query: command.query,
+            page,
+            pageSize,
+            enableReranking: false,
+            filters: {
+              ...command.filters,
+              lawType: 'Forskrift'
+            },
+            queryEmbedding // Reuse pre-computed embedding
+          })
+        ]);
+        
+        searchedTypes.push('Lov', 'Forskrift');
+        
+        // Check if Lov or Forskrift gave enough results
+        if (lovResult.hits && lovResult.hits.length >= minResults) {
+          searchResult = lovResult;
+          foundEnoughResults = true;
+        } else if (forskriftResult.hits && forskriftResult.hits.length >= minResults) {
+          searchResult = forskriftResult;
+          foundEnoughResults = true;
+        }
+        
+        // Track the best result so far (before checking remaining types)
+        if (!foundEnoughResults) {
+          const lovHitCount = lovResult.hits?.length ?? 0;
+          const forskriftHitCount = forskriftResult.hits?.length ?? 0;
+          
+          // Initialize bestResult with the better of Lov or Forskrift
+          if (lovHitCount >= forskriftHitCount) {
+            bestResult = lovResult;
+            if (forskriftHitCount > lovHitCount) {
+              bestResult = forskriftResult;
+            }
+          } else {
+            bestResult = forskriftResult;
+          }
+          
+          // If neither gave enough results, try remaining types sequentially
+          const remainingTypes = defaultLawTypePriority.slice(2); // Skip Lov and Forskrift (already searched)
+          
+          for (const lawType of remainingTypes) {
+            const typeResult = await searchLovdataPublicData({
+              store: archiveStore,
+              query: command.query,
+              page,
+              pageSize,
+              enableReranking: false,
+              filters: {
+                ...command.filters,
+                lawType
+              },
+              queryEmbedding // Reuse pre-computed embedding
+            });
+            
+            searchedTypes.push(lawType);
+            
+            // Track the best result so far
+            const typeHitCount = typeResult.hits?.length ?? 0;
+            if (!bestResult) {
+              bestResult = typeResult;
+            } else {
+              const bestHitCount = bestResult.hits?.length ?? 0;
+              if (typeHitCount > bestHitCount) {
+                bestResult = typeResult;
+              }
+            }
+            
+            // If we got enough results, use this type
+            if (typeResult.hits && typeResult.hits.length >= minResults) {
+              searchResult = typeResult;
+              foundEnoughResults = true;
+              break;
+            }
+          }
+        }
+        
+        // If no single type gave enough results, check if we found any results at all
+        if (!searchResult) {
+          if (bestResult && bestResult.hits && bestResult.hits.length > 0) {
+            // Use the best result we found (even if it didn't meet minResults threshold)
+            searchResult = bestResult;
+          } else {
+            // No results found with any law type filter - try without filter
+            // This handles the case where law_type might not be set in the database
+            searchResult = await searchLovdataPublicData({
+              store: archiveStore,
+              query: command.query,
+              page,
+              pageSize,
+              enableReranking: false,
+              filters: {
+                ...command.filters,
+                lawType: undefined // Remove lawType filter
+              },
+              queryEmbedding // Reuse pre-computed embedding
+            });
+          }
+        }
+      } else {
+        // Law type specified, use normal search
+        searchResult = await searchLovdataPublicData({
+          store: archiveStore,
+          query: command.query,
+          page,
+          pageSize,
+          filters: command.filters
+        });
       }
+      
+      // Ensure searchResult is not null (TypeScript safety check)
+      if (!searchResult) {
+        throw new Error('Search failed to return any results');
+      }
+
+      const hits = searchResult.hits ?? [];
+      const searchedFiles = searchResult.searchedFiles ?? [];
+      const totalHits = searchResult.totalHits ?? 0;
+      const totalPages = searchResult.totalPages ?? Math.max(1, Math.ceil(totalHits / pageSize));
+
+      // Serper fallback removed - agent will call serper directly when needed
 
       return {
         result: {
@@ -131,8 +249,7 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
           page,
           pageSize,
           totalHits,
-          totalPages,
-          fallback: fallbackInfo
+          totalPages
         },
         meta: {
           skill: 'lovdata-api',
@@ -143,8 +260,7 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
           page,
           pageSize,
           totalHits,
-          totalPages,
-          fallbackProvider: fallbackInfo?.provider
+          totalPages
         }
       };
     }

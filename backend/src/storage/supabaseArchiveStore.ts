@@ -13,6 +13,7 @@ import type {
 } from './types.js';
 import { extractQueryTokens } from './types.js';
 import { Timer } from '../utils/timing.js';
+import { env } from '../config/env.js';
 
 export class SupabaseArchiveStore {
   private readonly supabase = getSupabaseAdminClient();
@@ -453,6 +454,8 @@ export class SupabaseArchiveStore {
         lawType?: string | null;
         ministry?: string | null;
       };
+      queryEmbedding?: number[] | null; // Optional pre-computed query embedding to avoid regeneration
+      rrfK?: number; // Optional RRF k parameter (defaults to 60)
     }
   ): Promise<ArchiveSearchResult> {
     const searchTimer = new Timer('db_search', this.logs, {
@@ -486,9 +489,9 @@ export class SupabaseArchiveStore {
     // Join with & (AND) for all terms must match
     const tsQuery = tokens.map(token => `${token}:*`).join(' & ');
 
-    // Generate query embedding if hybrid search is available
-    let queryEmbedding: number[] | null = null;
-    if (this.embeddingService) {
+    // Use provided query embedding or generate one if hybrid search is available
+    let queryEmbedding: number[] | null = options.queryEmbedding ?? null;
+    if (!queryEmbedding && this.embeddingService) {
       try {
         const embeddingTimer = new Timer('generate_query_embedding', this.logs, { query: query.substring(0, 100) });
         queryEmbedding = await this.embeddingService.generateEmbedding(query);
@@ -499,6 +502,8 @@ export class SupabaseArchiveStore {
         this.logs.warn({ err: embeddingError }, 'Failed to generate query embedding - falling back to FTS-only search');
         queryEmbedding = null;
       }
+    } else if (queryEmbedding) {
+      this.logs.debug({ embeddingLength: queryEmbedding.length }, 'Using provided query embedding for hybrid search');
     }
 
     // Single optimized query with count
@@ -539,11 +544,17 @@ export class SupabaseArchiveStore {
             query_embedding: queryEmbedding,  // Pass as array directly
             result_limit: limit,
             result_offset: offset,
-            rrf_k: 60,  // RRF constant (typical value)
+            rrf_k: options.rrfK ?? env.RRF_K  // Use provided RRF k or environment default
             filter_year: options.filters?.year ?? null,
             filter_law_type: options.filters?.lawType ?? null,
             filter_ministry: options.filters?.ministry ?? null
           };
+          
+          this.logs.debug({
+            filter_law_type: options.filters?.lawType,
+            filter_year: options.filters?.year,
+            filter_ministry: options.filters?.ministry
+          }, 'searchAsync: RPC params with filters');
 
           this.logs.info({
             rpcFunction: rpcFunctionName,
@@ -607,15 +618,29 @@ export class SupabaseArchiveStore {
               // Call the RPC function for results
               const rpcCallPromise = this.supabase.rpc(rpcFunctionName, rpcParams);
 
-              // Also get the total count separately (RPC function may not return count)
-              // We'll use a simple count query with the same search criteria
-              const countQueryBuilder = this.supabase
+              // Also get the total count separately
+              // Since we're searching chunks, we need to count distinct documents that have chunks matching the filters
+              // For now, we'll use a simpler approach: count documents that match the search and filters
+              // Note: This may not be perfectly accurate since chunks might not exist for all documents
+              let countQueryBuilder = this.supabase
                 .from('lovdata_documents')
-                .select('*', { count: 'exact', head: true })
+                .select('id', { count: 'exact', head: true })
                 .textSearch('tsv_content', tsQuery, {
                   type: 'plain',
                   config: 'norwegian'
                 });
+              
+              // Apply the same filters as the RPC function (but on documents, not chunks)
+              // This is a best-effort count since we're searching chunks but counting documents
+              if (options.filters?.lawType) {
+                countQueryBuilder = countQueryBuilder.eq('law_type', options.filters.lawType);
+              }
+              if (options.filters?.year) {
+                countQueryBuilder = countQueryBuilder.eq('year', options.filters.year);
+              }
+              if (options.filters?.ministry) {
+                countQueryBuilder = countQueryBuilder.eq('ministry', options.filters.ministry);
+              }
 
               // Execute both queries in parallel
               const [rpcResult, countResult] = await Promise.all([
@@ -931,15 +956,30 @@ export class SupabaseArchiveStore {
 
     this.logs.info('searchAsync: no error, processing results');
 
-    // For chunk searches, count may not be available, so use data length if we have data
-    // For document searches, count should be available from the RPC function
-    const total = count ?? (data && data.length > 0 ? data.length : 0);
-    this.logs.info({ total, count, dataLength: data?.length ?? 0 }, 'searchAsync: checking if results are empty');
+    // For chunk searches, count query counts documents, but RPC searches chunks
+    // If RPC returns no results but count > 0, it means chunks don't match the filter
+    // In this case, we should use the count from RPC results (0) rather than document count
+    // Use data.length as the source of truth for chunk searches when we have results
+    // Otherwise, use count from document query (which may be inaccurate for chunk searches)
+    const total = data && data.length > 0 
+      ? Math.max(data.length, count ?? 0) // If we have chunk results, use at least that many
+      : (count ?? 0); // If no chunk results, use document count as approximation
+    
+    this.logs.info({ 
+      total, 
+      count, 
+      dataLength: data?.length ?? 0,
+      usingChunkBasedCount: !!(data && data.length > 0)
+    }, 'searchAsync: checking if results are empty');
 
     // If we have data, use it even if count is 0 (chunk searches don't return count)
     if (!data || data.length === 0) {
       searchTimer.end({ hits: 0, total: 0 });
-      this.logs.info('searchAsync: returning empty results (no data)');
+      this.logs.info({
+        reason: 'no_chunk_results',
+        documentCount: count ?? 0,
+        message: 'RPC function returned no chunks matching the filter, even though documents exist'
+      }, 'searchAsync: returning empty results (no data)');
       return { hits: [], total: 0 };
     }
 

@@ -13,6 +13,12 @@ export type AgentInput = {
   question: string;
   evidence: AgentEvidence[];
   locale?: string;
+  functions?: Array<{
+    name: string;
+    description?: string;
+    parameters: object;
+  }>;
+  functionResults?: AgentFunctionResult[];
 };
 
 export type AgentOutputCitation = {
@@ -21,10 +27,23 @@ export type AgentOutputCitation = {
   quote?: string;
 };
 
+export type AgentFunctionCall = {
+  name: string;
+  arguments: string; // JSON string
+  toolCallId: string; // ID from OpenAI's tool_calls (must be <= 40 chars)
+};
+
+export type AgentFunctionResult = {
+  name: string;
+  result: unknown;
+  toolCallId: string; // ID from OpenAI's tool_calls (must be <= 40 chars)
+};
+
 export type AgentOutput = {
-  answer: string;
-  citations: AgentOutputCitation[];
+  answer?: string;
+  citations?: AgentOutputCitation[];
   model?: string;
+  functionCalls?: AgentFunctionCall[];
 };
 
 export interface Agent {

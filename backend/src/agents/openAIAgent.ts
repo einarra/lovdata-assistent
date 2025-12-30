@@ -1,10 +1,44 @@
 import OpenAI from 'openai';
 import { env } from '../config/env.js';
 import { logger } from '../logger.js';
-import type { Agent, AgentEvidence, AgentInput, AgentOutput } from './types.js';
+import type { Agent, AgentEvidence, AgentInput, AgentOutput, AgentOutputCitation } from './types.js';
 
-const SYSTEM_PROMPT = `Du er en juridisk assistent som bruker dokumenter fra Lovdatas offentlige data.
-Svar alltid på norsk med et presist, nøkternt språk.
+const SYSTEM_PROMPT_BASE = `Du er en juridisk assistent som bruker dokumenter fra Lovdatas offentlige data.
+Svar alltid på norsk med et presist, nøkternt språk.`;
+
+const SYSTEM_PROMPT_WITH_FUNCTIONS = `${SYSTEM_PROMPT_BASE}
+
+Funksjonsbruk:
+Du har tilgang til to søkefunksjoner:
+
+1. search_lovdata_legal_documents:
+   - Bruk denne for å finne lover, forskrifter, vedtak og andre juridiske dokumenter.
+   - Ekstraher relevante søkeord fra brukerens spørsmål for query-parameteret.
+   - Hvis brukerens spørsmål ikke spesifiserer dokumenttype, la lawType være undefined - funksjonen vil da automatisk søke i prioritert rekkefølge.
+   - Dokumenttype-prioritering (hvis ikke spesifisert av brukeren): 1. Lov, 2. Forskrift, 3. Vedtak, 4. Instruks, 5. Reglement, 6. Vedlegg.
+   - Hvis første søk gir få resultater, kan du prøve en annen dokumenttype eller søke uten spesifikk type.
+
+2. search_lovdata_legal_practice:
+   - Bruk denne for å finne utdypende informasjon om hvordan lover og forskrifter brukes i praksis.
+   - Søker i rettsavgjørelser, Lovtidend, Trygderetten, Husleietvistutvalget og lignende kilder.
+   - Bruk denne når du trenger: eksempler på praktisk anvendelse av lover, rettsavgjørelser som illustrerer tolkning av lovtekster, eller kontekst om hvordan rettsregler brukes i rettssystemet.
+   - Bruk gjerne begge funksjoner i kombinasjon: først search_lovdata_legal_documents for lovtekster, deretter search_lovdata_legal_practice for praktiske eksempler.
+
+Retningslinjer:
+- Du blir gitt et spørsmål og kan søke etter relevante dokumenter ved å bruke funksjoner.
+- Vurder når det er lurt å bruke begge funksjoner for å gi et komplett svar.
+- Evaluer informasjonen fra søkeresultatene og bruk det til å svare på spørsmålet.
+- Lag en oppsummering som tar med hovedpunkter og peker på den mest relevante informasjonen med forklaring.
+- Gi sitatreferanser ved å bruke evidenceId for å referere til kildene.
+- VIKTIG: Inkluder HTML-lenker til dokumentene i svaret ditt. Hver kilde i evidence-listen har en "link"-felt med direkte lenke til dokumentet.
+- Bruk HTML-format for lenker: <a href="link">tittel</a> når du refererer til dokumenter i answer-feltet.
+- Alle dokumenter som brukes i svaret skal ha lenker inkludert.
+- Hvis du mangler tilstrekkelig grunnlag, si det høflig og foreslå videre søk.
+- Når du har nok informasjon, returner JSON på formatet {"answer": "...", "citations": [{"evidenceId": "lovdata-1", "quote": "..."}]}.
+- Hvis du trenger å søke, bruk funksjonene tilgjengelig for deg.
+- Merk: Labels (nummerering) vil bli satt automatisk basert på rekkefølgen i listen.`;
+
+const SYSTEM_PROMPT_WITHOUT_FUNCTIONS = `${SYSTEM_PROMPT_BASE}
 
 Retningslinjer:
 - Du blir gitt et spørsmål og en liste over kilder med relevant informasjon.
@@ -45,7 +79,52 @@ export class OpenAIAgent implements Agent {
   }
 
   async generate(input: AgentInput): Promise<AgentOutput> {
-    const prompt = buildUserPrompt(input.question, input.evidence);
+    // Input validation
+    if (!input.question || typeof input.question !== 'string') {
+      throw new Error('Question is required and must be a string');
+    }
+    
+    const trimmedQuestion = input.question.trim();
+    if (trimmedQuestion.length === 0) {
+      throw new Error('Question cannot be empty');
+    }
+    
+    if (trimmedQuestion.length > CONFIG.MAX_QUESTION_LENGTH) {
+      logger.warn({ 
+        questionLength: trimmedQuestion.length,
+        maxLength: CONFIG.MAX_QUESTION_LENGTH 
+      }, 'Question exceeds maximum length, truncating');
+    }
+    
+    const question = trimmedQuestion.substring(0, CONFIG.MAX_QUESTION_LENGTH);
+    
+    // Validate evidence
+    if (input.evidence && input.evidence.length > CONFIG.MAX_EVIDENCE_COUNT) {
+      logger.warn({ 
+        evidenceCount: input.evidence.length,
+        maxCount: CONFIG.MAX_EVIDENCE_COUNT 
+      }, 'Evidence array exceeds maximum count, truncating');
+    }
+    
+    const evidence = input.evidence?.slice(0, CONFIG.MAX_EVIDENCE_COUNT) ?? [];
+    
+    // Determine which system prompt to use based on whether functions are provided
+    const hasFunctions = input.functions && input.functions.length > 0;
+    const systemPrompt = hasFunctions ? SYSTEM_PROMPT_WITH_FUNCTIONS : SYSTEM_PROMPT_WITHOUT_FUNCTIONS;
+    
+    // Build prompt - if we have function results, include them
+    let prompt = buildUserPrompt(question, evidence);
+    
+    // If we have function results from previous calls, include them in the prompt
+    if (input.functionResults && input.functionResults.length > 0) {
+      const functionResultsText = input.functionResults.map((fr, idx) => {
+        const resultStr = typeof fr.result === 'string' 
+          ? fr.result 
+          : JSON.stringify(fr.result, null, 2);
+        return `Resultat fra ${fr.name} (kall ${idx + 1}):\n${resultStr}`;
+      }).join('\n\n');
+      prompt = `${prompt}\n\nTidligere søkeresultater:\n${functionResultsText}`;
+    }
     
     // Validate model name - "gpt-5" is not a valid OpenAI model and may cause hangs
     const knownValidModels = ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo'];
@@ -56,127 +135,139 @@ export class OpenAIAgent implements Agent {
       }, 'OpenAIAgent.generate: model name not in known valid list - this may cause the API to hang or fail. Common valid models: gpt-4o-mini, gpt-4o, gpt-4-turbo');
     }
     
+    logger.info({
+      hasFunctions,
+      functionCount: input.functions?.length ?? 0,
+      functionResultsCount: input.functionResults?.length ?? 0
+    }, 'OpenAIAgent.generate: function calling info');
+    
     // Calculate adaptive timeout based on prompt size
     // Larger prompts take longer to process
     // With Vercel Pro 60s limit, we have plenty of headroom (~57s remaining after setup)
     // Use a generous fixed timeout since we have headroom - simpler and more reliable
-    // Base timeout: 30 seconds for all prompts
-    // Add 2 seconds per 10KB of prompt (up to 55 seconds max to leave 5s buffer)
+    // Base timeout: configurable via environment variable (default 30s)
+    // Add 2 seconds per 10KB of prompt (up to max timeout to leave 5s buffer)
     const promptSizeKB = prompt.length / 1024;
-    const baseTimeout = 30000; // 30 seconds base (increased from 20s)
-    const additionalTimeout = Math.min(promptSizeKB * 200, 25000); // 2s per 10KB, max 25s additional
-    const timeoutMs = Math.min(baseTimeout + additionalTimeout, 55000); // Max 55 seconds (leaves 5s buffer for Vercel)
+    const baseTimeout = env.OPENAI_AGENT_BASE_TIMEOUT_MS;
+    const maxTimeout = env.OPENAI_AGENT_MAX_TIMEOUT_MS;
+    const additionalTimeout = Math.min(promptSizeKB * 200, maxTimeout - baseTimeout); // 2s per 10KB
+    const timeoutMs = Math.min(baseTimeout + additionalTimeout, maxTimeout);
     
     logger.info({ 
-      question: input.question,
-      evidenceCount: input.evidence.length,
+      question: question.substring(0, 100),
+      evidenceCount: evidence.length,
       model: this.model,
       promptLength: prompt.length,
       promptSizeKB: Math.round(promptSizeKB * 10) / 10,
       timeoutMs
     }, 'OpenAIAgent.generate: starting API call');
+    
     const startTime = Date.now();
     const controller = new AbortController();
 
-    // Add progress checks while waiting for OpenAI API
-    console.log(`[OpenAIAgent] Setting up progress checks...`);
-    const progressCheckInterval = setInterval(() => {
-      const elapsed = Date.now() - startTime;
-      console.log(`[OpenAIAgent] Still waiting for OpenAI response... elapsed: ${elapsed}ms, timeout at: ${timeoutMs}ms`);
-    }, 1000); // Check every 1 second to monitor progress
+    // Debug mode: Add progress checks only if DEBUG_OPENAI_AGENT is enabled
+    let progressCheckInterval: NodeJS.Timeout | null = null;
+    const safetyChecks: NodeJS.Timeout[] = [];
     
-    // Add safety checks at 1s, 2s, 3s, and 4s to monitor progress (timeout is 5s)
-    const safetyCheck1s = setTimeout(() => {
-      const elapsed = Date.now() - startTime;
-      console.log(`[OpenAIAgent] Safety check at 1s - elapsed: ${elapsed}ms, timeout will trigger in ~${timeoutMs - elapsed}ms`);
-    }, 1000);
-    
-    const safetyCheck2s = setTimeout(() => {
-      const elapsed = Date.now() - startTime;
-      console.log(`[OpenAIAgent] Safety check at 2s - elapsed: ${elapsed}ms, timeout will trigger in ~${timeoutMs - elapsed}ms`);
-    }, 2000);
-    
-    const safetyCheck3s = setTimeout(() => {
-      const elapsed = Date.now() - startTime;
-      console.log(`[OpenAIAgent] Safety check at 3s - elapsed: ${elapsed}ms, timeout will trigger in ~${timeoutMs - elapsed}ms`);
-    }, 3000);
-    
-    const safetyCheck4s = setTimeout(() => {
-      const elapsed = Date.now() - startTime;
-      console.log(`[OpenAIAgent] Safety check at 4s - elapsed: ${elapsed}ms, timeout will trigger in ~${timeoutMs - elapsed}ms`);
-    }, 4000);
-    
-    const specificChecks: NodeJS.Timeout[] = [safetyCheck1s, safetyCheck2s, safetyCheck3s, safetyCheck4s];
+    if (DEBUG_MODE) {
+      logger.debug('OpenAIAgent: Setting up progress checks (debug mode enabled)');
+      progressCheckInterval = setInterval(() => {
+        const elapsed = Date.now() - startTime;
+        logger.debug({ elapsedMs: elapsed, timeoutMs }, 'OpenAIAgent: Still waiting for OpenAI response');
+      }, 1000);
+      
+      // Add safety checks at intervals (only in debug mode)
+      [1000, 2000, 3000, 4000].forEach(delay => {
+        const check = setTimeout(() => {
+          const elapsed = Date.now() - startTime;
+          logger.debug({ elapsedMs: elapsed, timeoutMs, remainingMs: timeoutMs - elapsed }, 'OpenAIAgent: Safety check');
+        }, delay);
+        safetyChecks.push(check);
+      });
+    }
 
     let response;
     try {
-      console.log(`[OpenAIAgent] Starting API call, timeout: ${timeoutMs}ms`);
-      logger.info({ timeoutMs }, 'OpenAIAgent.generate: calling OpenAI API');
-      console.log(`[OpenAIAgent] About to call OpenAI API with AbortController signal`);
+      if (DEBUG_MODE) {
+        logger.debug({ timeoutMs }, 'OpenAIAgent: Starting API call');
+        logger.debug({ model: this.model, promptLength: prompt.length, evidenceCount: evidence.length }, 'OpenAIAgent: API call parameters');
+      }
       
-      // Create the API call promise
-      // Log before creating the promise to see if we get here
-      console.log(`[OpenAIAgent] About to create chat.completions.create call...`);
-      console.log(`[OpenAIAgent] Model: ${this.model}, prompt length: ${prompt.length}, evidence count: ${input.evidence.length}`);
+      logger.info({ timeoutMs }, 'OpenAIAgent.generate: calling OpenAI API');
+      
+      // Build messages array - include function results as assistant messages
+      const messages: Array<{ role: 'system' | 'user' | 'assistant' | 'tool'; content?: string; tool_calls?: unknown[]; tool_call_id?: string; name?: string }> = [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: prompt }
+      ];
+      
+      // Note: We don't include tool messages here because OpenAI requires them to follow
+      // an assistant message with tool_calls, and we don't store message history between iterations.
+      // Instead, we include function results in the user prompt (already done above in prompt building).
+      
+      // Build tools array if functions are provided
+      const tools = hasFunctions ? input.functions!.map(fn => ({
+        type: 'function' as const,
+        function: {
+          name: fn.name,
+          description: fn.description,
+          parameters: fn.parameters as Record<string, unknown>
+        }
+      })) as OpenAI.Chat.Completions.ChatCompletionTool[] : undefined;
+      
+      const requestParams: Parameters<typeof this.client.chat.completions.create>[0] = {
+        model: this.model,
+        temperature: this.temperature,
+        messages: messages as any,
+        max_tokens: hasFunctions ? 2000 : 1000 // Allow more tokens when function calling
+      };
+      
+      // Only set response_format and tools when appropriate
+      if (!hasFunctions) {
+        requestParams.response_format = { type: 'json_object' };
+      } else {
+        requestParams.tools = tools;
+        requestParams.tool_choice = 'auto'; // Let the model decide when to use tools
+      }
       
       const apiCallPromise = this.client.chat.completions.create(
-        {
-          model: this.model,
-          temperature: this.temperature,
-          messages: [
-            { role: 'system', content: SYSTEM_PROMPT },
-            { role: 'user', content: prompt }
-          ],
-          response_format: { type: 'json_object' },
-          max_tokens: 1000 // Limit tokens to ensure faster response
-        },
+        requestParams,
         {
           signal: controller.signal
         }
       ).catch(error => {
         // Log immediately if the promise rejects
         const elapsed = Date.now() - startTime;
-        console.log(`[OpenAIAgent] API call promise rejected immediately after ${elapsed}ms:`, error instanceof Error ? error.message : String(error));
+        if (DEBUG_MODE) {
+          logger.debug({ elapsedMs: elapsed, error: error instanceof Error ? error.message : String(error) }, 'OpenAIAgent: API call promise rejected immediately');
+        }
         throw error;
       });
-      
-      console.log(`[OpenAIAgent] chat.completions.create promise created (not awaited yet)`);
       
       // Create a timeout promise that will reject if the API call takes too long
       // Use a separate timeout ID so we can log when it's set up
       // Create the timeout OUTSIDE the Promise constructor to ensure it's set immediately
-      console.log(`[OpenAIAgent] Creating timeout promise, will trigger in ${timeoutMs}ms`);
       let timeoutId: NodeJS.Timeout | null = null;
       const timeoutPromise = new Promise<never>((_, reject) => {
-        // Add immediate logging before setting timeout
-        console.log(`[OpenAIAgent] About to set timeout for ${timeoutMs}ms`);
         timeoutId = setTimeout(() => {
           const elapsed = Date.now() - startTime;
-          // Use console.log for immediate visibility (logger might not flush)
-          console.log(`[OpenAIAgent] ========== TIMEOUT PROMISE TRIGGERED after ${elapsed}ms ==========`);
-          console.log(`[OpenAIAgent] Timeout callback executing, aborting controller...`);
           logger.error({ elapsedMs: elapsed, timeoutMs }, 'OpenAIAgent.generate: timeout triggered');
           controller.abort();
-          console.log(`[OpenAIAgent] Controller aborted, rejecting promise...`);
           reject(new Error(`OpenAI API call timed out after ${timeoutMs}ms`));
-          console.log(`[OpenAIAgent] Promise rejected in timeout callback`);
         }, timeoutMs);
-        console.log(`[OpenAIAgent] Timeout promise created, timeoutId: ${timeoutId ? 'set' : 'not set'}`);
-        // Add a log right after setting the timeout to confirm it's scheduled
-        if (timeoutId) {
-          console.log(`[OpenAIAgent] Timeout scheduled successfully, will fire in ${timeoutMs}ms`);
+        
+        if (DEBUG_MODE) {
+          logger.debug({ timeoutMs, timeoutId: timeoutId ? 'set' : 'not set' }, 'OpenAIAgent: Timeout promise created');
         }
       });
       
-      console.log(`[OpenAIAgent] API call promise created, awaiting response with Promise.race...`);
-      console.log(`[OpenAIAgent] About to await Promise.race([apiCallPromise, timeoutPromise])`);
-      
       // Use Promise.race to ensure timeout always triggers
-      // Add a wrapper to log which promise resolves first
       const racePromise = Promise.race([
         apiCallPromise.then(result => {
           const elapsed = Date.now() - startTime;
-          console.log(`[OpenAIAgent] API call promise resolved first after ${elapsed}ms`);
+          if (DEBUG_MODE) {
+            logger.debug({ elapsedMs: elapsed }, 'OpenAIAgent: API call promise resolved first');
+          }
           // Clear timeout since we succeeded
           if (timeoutId) {
             clearTimeout(timeoutId);
@@ -186,27 +277,17 @@ export class OpenAIAgent implements Agent {
         }),
         timeoutPromise.catch(error => {
           const elapsed = Date.now() - startTime;
-          console.log(`[OpenAIAgent] Timeout promise rejected first after ${elapsed}ms`);
+          if (DEBUG_MODE) {
+            logger.debug({ elapsedMs: elapsed }, 'OpenAIAgent: Timeout promise rejected first');
+          }
           throw error;
         })
       ]);
       
-      console.log(`[OpenAIAgent] Promise.race created, awaiting result...`);
-      
-      // Add an immediate check to confirm we're actually awaiting
-      setTimeout(() => {
-        const elapsed = Date.now() - startTime;
-        console.log(`[OpenAIAgent] Immediate check (0.5s) - elapsed: ${elapsed}ms, still awaiting...`);
-      }, 500);
-      
-      // Wrap the await in a try-catch with more detailed logging
+      // Wrap the await in a try-catch with proper cleanup
       try {
-        console.log(`[OpenAIAgent] About to await racePromise...`);
         response = await racePromise;
-        console.log(`[OpenAIAgent] racePromise resolved successfully`);
       } catch (raceError) {
-        const elapsed = Date.now() - startTime;
-        console.log(`[OpenAIAgent] racePromise rejected after ${elapsed}ms:`, raceError instanceof Error ? raceError.message : String(raceError));
         // Clear timeout on error too
         if (timeoutId) {
           clearTimeout(timeoutId);
@@ -214,29 +295,55 @@ export class OpenAIAgent implements Agent {
         }
         throw raceError;
       } finally {
-        // Clear all timeouts and intervals
+        // Clear all timeouts and intervals in all exit paths
         if (timeoutId) {
           clearTimeout(timeoutId);
+          timeoutId = null;
         }
-        clearInterval(progressCheckInterval);
-        specificChecks.forEach(clearTimeout);
-        console.log(`[OpenAIAgent] Progress checks cleared`);
+        if (progressCheckInterval) {
+          clearInterval(progressCheckInterval);
+          progressCheckInterval = null;
+        }
+        safetyChecks.forEach(check => {
+          clearTimeout(check);
+        });
+        safetyChecks.length = 0; // Clear array
+        
+        if (DEBUG_MODE) {
+          logger.debug('OpenAIAgent: Progress checks cleared');
+        }
       }
       
       const elapsed = Date.now() - startTime;
-      console.log(`[OpenAIAgent] API call completed after ${elapsed}ms`);
+      if (DEBUG_MODE) {
+        logger.debug({ elapsedMs: elapsed }, 'OpenAIAgent: API call completed');
+      }
+      
+      // Type guard for ChatCompletion (not Stream)
+      if (!response || 'choices' in response === false) {
+        throw new Error('Unexpected response type from OpenAI API');
+      }
+      
       logger.info({ 
         hasResponse: !!response,
-        choicesCount: response?.choices?.length ?? 0,
+        choicesCount: response.choices?.length ?? 0,
         elapsedMs: elapsed
       }, 'OpenAIAgent.generate: OpenAI API call completed');
     } catch (error) {
-      // Clear all timeouts and intervals
-      clearInterval(progressCheckInterval);
-      specificChecks.forEach(clearTimeout);
+      // Clear all timeouts and intervals in error path
+      if (progressCheckInterval) {
+        clearInterval(progressCheckInterval);
+        progressCheckInterval = null;
+      }
+      safetyChecks.forEach(check => {
+        clearTimeout(check);
+      });
+      safetyChecks.length = 0;
+      
       const elapsed = Date.now() - startTime;
-      console.log(`[OpenAIAgent] Catch block entered after ${elapsed}ms`);
-      console.log(`[OpenAIAgent] API call failed after ${elapsed}ms:`, error instanceof Error ? error.message : String(error));
+      if (DEBUG_MODE) {
+        logger.debug({ elapsedMs: elapsed, error: error instanceof Error ? error.message : String(error) }, 'OpenAIAgent: Catch block entered');
+      }
       
       if (error instanceof Error && (error.name === 'AbortError' || error.message.includes('timed out'))) {
         logger.error({ timeoutMs, elapsedMs: elapsed }, 'OpenAIAgent.generate: API call timed out');
@@ -250,17 +357,54 @@ export class OpenAIAgent implements Agent {
       throw error;
     }
 
-    const raw = response.choices[0]?.message?.content ?? '';
-    console.log(`[OpenAIAgent] Response received, raw length: ${raw.length}`);
+    // Type guard: response should be ChatCompletion at this point
+    if (!response || !('choices' in response)) {
+      throw new Error('Unexpected response type from OpenAI API');
+    }
+    
+    const message = response.choices[0]?.message;
+    const toolCalls = message?.tool_calls;
+    const raw = message?.content ?? '';
+    
+    // Check if the model wants to call functions
+    if (toolCalls && toolCalls.length > 0) {
+      if (DEBUG_MODE) {
+        logger.debug({ toolCallsCount: toolCalls.length }, 'OpenAIAgent: Model requested function calls');
+      }
+      logger.info({ toolCallsCount: toolCalls.length }, 'OpenAIAgent.generate: model requested function calls');
+      
+      // Extract function calls with tool_call_id
+      const functionCalls: AgentOutput['functionCalls'] = toolCalls
+        .filter((tc: any) => tc.type === 'function')
+        .map((tc: any) => ({
+          name: tc.function.name,
+          arguments: tc.function.arguments,
+          toolCallId: tc.id // Store the actual tool_call_id from OpenAI (must be <= 40 chars)
+        }));
+      
+      return {
+        functionCalls,
+        model: this.model
+      };
+    }
+    
+    // No function calls - parse the response as usual
+    if (DEBUG_MODE) {
+      logger.debug({ rawLength: raw.length }, 'OpenAIAgent: Response received');
+    }
     logger.info({ rawLength: raw.length }, 'OpenAIAgent.generate: parsing response');
     
     let parsed;
     try {
       parsed = parseAgentJson(raw);
-      console.log(`[OpenAIAgent] Response parsed successfully, hasAnswer: ${!!parsed.answer}`);
+      if (DEBUG_MODE) {
+        logger.debug({ hasAnswer: !!parsed.answer }, 'OpenAIAgent: Response parsed successfully');
+      }
       logger.debug({ hasAnswer: !!parsed.answer }, 'OpenAIAgent.generate: JSON parsed');
     } catch (parseError) {
-      console.log(`[OpenAIAgent] Parse error:`, parseError instanceof Error ? parseError.message : String(parseError));
+      if (DEBUG_MODE) {
+        logger.debug({ error: parseError instanceof Error ? parseError.message : String(parseError) }, 'OpenAIAgent: Parse error');
+      }
       logger.error({ err: parseError, raw }, 'OpenAIAgent.generate: failed to parse JSON response');
       return {
         answer: raw.trim() || 'Jeg klarte ikke å formulere et svar basert på kildene.',
@@ -278,36 +422,51 @@ export class OpenAIAgent implements Agent {
       };
     }
 
-    const citations = Array.isArray(parsed.citations)
-      ? parsed.citations
-          .map((entry: unknown) => normaliseCitation(entry))
-          .filter(
-            (entry: AgentOutput['citations'][number] | undefined): entry is AgentOutput['citations'][number] =>
-              Boolean(entry)
-          )
-      : undefined;
+    const citations: AgentOutput['citations'] = (() => {
+      if (!Array.isArray(parsed.citations)) {
+        return [];
+      }
+      const normalized = parsed.citations
+        .map((entry: unknown) => normaliseCitation(entry))
+        .filter((entry): entry is NonNullable<typeof entry> => entry !== undefined);
+      return normalized;
+    })();
 
-    console.log(`[OpenAIAgent] Finalizing response, answer length: ${parsed.answer.trim().length}, citations: ${citations?.length ?? 0}`);
+    if (DEBUG_MODE) {
+      logger.debug({ 
+        answerLength: parsed.answer.trim().length,
+        citationsCount: citations.length
+      }, 'OpenAIAgent: Finalizing response');
+    }
+    
     logger.info({ 
       answerLength: parsed.answer.trim().length,
-      citationsCount: citations?.length ?? 0
+      citationsCount: citations.length
     }, 'OpenAIAgent.generate: response parsed successfully');
 
-    const result = {
+    const result: AgentOutput = {
       answer: parsed.answer.trim(),
-      citations: citations ?? [],
+      citations: citations,
       model: this.model
     };
     
-    console.log(`[OpenAIAgent] Returning result, answer length: ${result.answer.length}`);
     return result;
   }
 }
 
-// Maximum content length per evidence item (characters)
-const MAX_CONTENT_PER_EVIDENCE = 3000; // ~3KB per evidence item
-// Maximum total prompt length (characters) - leave room for question and formatting
-const MAX_TOTAL_PROMPT_LENGTH = 50000; // ~50KB total prompt
+// Configuration constants
+const CONFIG = {
+  MAX_CONTENT_PER_EVIDENCE: 3000, // ~3KB per evidence item
+  MAX_TOTAL_PROMPT_LENGTH: 50000, // ~50KB total prompt
+  EVIDENCE_OVERHEAD: 200, // Overhead for question and formatting
+  MIN_EVIDENCE_SPACE: 10000, // Minimum space reserved for evidence
+  TRUNCATION_HEAD_LIMIT_OFFSET: 500, // Chars to reserve for tail when truncating
+  MAX_QUESTION_LENGTH: 5000, // Maximum question length
+  MAX_EVIDENCE_COUNT: 100 // Maximum evidence items
+} as const;
+
+// Debug mode flag (can be overridden for testing)
+const DEBUG_MODE = env.DEBUG_OPENAI_AGENT || process.env.NODE_ENV === 'development';
 
 function truncateEvidenceContent(content: string | null | undefined, maxLength: number): string | undefined {
   if (!content) {
@@ -317,9 +476,9 @@ function truncateEvidenceContent(content: string | null | undefined, maxLength: 
     return content;
   }
   // Truncate to maxLength, keeping beginning and end
-  const headLimit = Math.max(maxLength - 500, 0);
+  const headLimit = Math.max(maxLength - CONFIG.TRUNCATION_HEAD_LIMIT_OFFSET, 0);
   const head = headLimit > 0 ? content.slice(0, headLimit).trimEnd() : '';
-  const tail = content.slice(-500).trimStart();
+  const tail = content.slice(-CONFIG.TRUNCATION_HEAD_LIMIT_OFFSET).trimStart();
   if (!head) {
     return tail;
   }
@@ -332,9 +491,9 @@ function buildUserPrompt(question: string, evidence: AgentEvidence[]): string {
   }
 
   // Calculate available space for evidence (subtract question and formatting overhead)
-  const questionAndOverhead = question.length + 200; // Question + formatting text
-  const availableForEvidence = Math.max(MAX_TOTAL_PROMPT_LENGTH - questionAndOverhead, 10000); // At least 10KB for evidence
-  const maxContentPerItem = Math.min(MAX_CONTENT_PER_EVIDENCE, Math.floor(availableForEvidence / evidence.length));
+  const questionAndOverhead = question.length + CONFIG.EVIDENCE_OVERHEAD;
+  const availableForEvidence = Math.max(CONFIG.MAX_TOTAL_PROMPT_LENGTH - questionAndOverhead, CONFIG.MIN_EVIDENCE_SPACE);
+  const maxContentPerItem = Math.min(CONFIG.MAX_CONTENT_PER_EVIDENCE, Math.floor(availableForEvidence / evidence.length));
 
   let totalLength = questionAndOverhead;
   const formattedEvidence = evidence
@@ -353,7 +512,7 @@ function buildUserPrompt(question: string, evidence: AgentEvidence[]): string {
       ].filter(Boolean);
       
       const formatted = parts.join('\n');
-      totalLength += formatted.length + 10; // +10 for separators
+      // totalLength tracking removed - truncation handled by final check below
       
       return formatted;
     })
@@ -362,16 +521,16 @@ function buildUserPrompt(question: string, evidence: AgentEvidence[]): string {
   const prompt = `Brukerspørsmål: ${question}\n\nTilgjengelige kilder:\n${formattedEvidence}\n\nInstruksjoner: Besvar spørsmålet ved å bruke kildene. Husk å returnere JSON-formatet som spesifisert.`;
   
   // Final safety check - if prompt is still too long, truncate the entire evidence section
-  if (prompt.length > MAX_TOTAL_PROMPT_LENGTH) {
+  if (prompt.length > CONFIG.MAX_TOTAL_PROMPT_LENGTH) {
     logger.warn({ 
       promptLength: prompt.length, 
-      maxLength: MAX_TOTAL_PROMPT_LENGTH,
+      maxLength: CONFIG.MAX_TOTAL_PROMPT_LENGTH,
       evidenceCount: evidence.length 
     }, 'buildUserPrompt: prompt exceeded max length, applying additional truncation');
     
     const questionPart = `Brukerspørsmål: ${question}\n\nTilgjengelige kilder:\n`;
     const instructionPart = `\n\nInstruksjoner: Besvar spørsmålet ved å bruke kildene. Husk å returnere JSON-formatet som spesifisert.`;
-    const availableForEvidenceTruncated = MAX_TOTAL_PROMPT_LENGTH - questionPart.length - instructionPart.length;
+    const availableForEvidenceTruncated = CONFIG.MAX_TOTAL_PROMPT_LENGTH - questionPart.length - instructionPart.length;
     
     // Truncate each evidence item more aggressively
     const truncatedEvidence = evidence
@@ -414,7 +573,7 @@ function parseAgentJson(raw: string): { answer?: string; citations?: AgentOutput
   }
 }
 
-function normaliseCitation(entry: unknown): AgentOutput['citations'][number] | undefined {
+function normaliseCitation(entry: unknown): AgentOutputCitation | undefined {
   if (!entry || typeof entry !== 'object') {
     return undefined;
   }

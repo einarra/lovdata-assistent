@@ -19,6 +19,8 @@
     "sync-archives": "tsx scripts/syncArchives.ts",
     "backfill-embeddings": "NODE_ENV=development tsx scripts/backfillEmbeddings.ts",
     "chunk-documents": "NODE_ENV=development tsx scripts/chunkDocuments.ts",
+        "backfill-law-types": "NODE_ENV=development tsx src/scripts/backfillLawTypes.ts",
+        "backfill-chunk-embeddings": "NODE_ENV=development tsx src/scripts/backfillChunkEmbeddings.ts",
     "lint": "eslint --ext .ts src",
     "test": "vitest run"
   },

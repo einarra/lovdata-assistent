@@ -1,6 +1,6 @@
 import { performance } from 'node:perf_hooks';
 import { getAgent } from '../agents/index.js';
-import type { AgentEvidence, AgentOutputCitation, AgentOutput } from '../agents/types.js';
+import type { AgentEvidence, AgentOutputCitation, AgentOutput, AgentFunctionCall, AgentFunctionResult } from '../agents/types.js';
 import { env } from '../config/env.js';
 import { getServices } from './index.js';
 import type { ServiceRegistry } from './index.js';
@@ -8,6 +8,8 @@ import { getOrchestrator } from '../skills/index.js';
 import type { SkillOutput } from '../skills/skills-core.js';
 import { logger } from '../logger.js';
 import { withTrace } from '../observability/tracing.js';
+import { lovdataSearchFunction } from '../skills/lovdata-api/functionSchema.js';
+import { lovdataSerperFunction } from '../skills/lovdata-serper/functionSchema.js';
 
 type AssistantPipelineResult = {
   response: AssistantRunResponse;
@@ -83,237 +85,251 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
         now: new Date(),
         locale: options.locale,
         services,
-        scratch: {}
+        scratch: {},
+        agentCall: true // Flag to indicate this is an agent call
       } as const;
 
-      logger.info('runAssistant: calling skill.searchPublicData');
-      let skillOutput: any;
-      try {
-        // Add overall timeout for the entire skill execution (55 seconds - leaves 5s buffer for Vercel Pro 60s limit)
-        const skillTimeoutMs = 55000;
-        const skillTimeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(() => {
-            reject(new Error(`Skill execution timed out after ${skillTimeoutMs}ms`));
-          }, skillTimeoutMs);
-        });
-
-        const skillExecutionPromise = withTrace(
-          {
-            name: 'skill.searchPublicData',
-            runType: 'tool',
-            inputs: {
-              action: 'searchPublicData',
-              query: question,
-              page,
-              pageSize
-            },
-            tags: ['skill', 'lovdata'],
-            getOutputs: (output: any) => ({
-              hits: Array.isArray((output.result as LovdataSkillSearchResult)?.hits)
-                ? (output.result as LovdataSkillSearchResult).hits?.length
-                : undefined
-            })
-          },
-          async () => {
-            logger.info('runAssistant: calling orchestrator.run');
-            const result = await orchestrator.run(
-              {
-                input: {
-                  action: 'searchPublicData',
-                  query: question,
-                  latest: DEFAULT_LATEST_ARCHIVES,
-                  maxHits: DEFAULT_MAX_HITS,
-                  page,
-                  pageSize
-                }
-              },
-              ctx
-            );
-            // Reduced logging
-            return result;
-          }
-        );
-
-        const traceResult = await Promise.race([skillExecutionPromise, skillTimeoutPromise]);
-        skillOutput = traceResult;
-        logger.info('runAssistant: skill.searchPublicData trace completed');
-      } catch (skillError) {
-        logger.error({
-          err: skillError,
-          stack: skillError instanceof Error ? skillError.stack : undefined
-        }, 'runAssistant: skill.searchPublicData failed');
-
-        // If skill execution fails or times out, continue with empty results
-        // This allows the assistant to still provide a response
-        logger.warn('runAssistant: continuing with empty results due to skill failure');
-        skillOutput = {
-          result: {
-            hits: [],
-            searchedFiles: [],
-            totalHits: 0,
-            page: 1,
-            pageSize: 5,
-            totalPages: 0
-          },
-          meta: {
-            skill: 'lovdata-api',
-            action: 'searchPublicData',
-            error: skillError instanceof Error ? skillError.message : String(skillError)
-          }
-        };
-      }
-
-      // skillOutput is { result: SkillOutput, runId: string } from withTrace
-      // SkillOutput has { result: any, meta?: any }
-      const skillOutputData = skillOutput.result;
-      logger.info({
-        hasResult: !!skillOutputData,
-        resultType: typeof skillOutputData,
-        hasResultField: skillOutputData && typeof skillOutputData === 'object' && 'result' in skillOutputData,
-        resultKeys: skillOutputData && typeof skillOutputData === 'object' ? Object.keys(skillOutputData) : []
-      }, 'runAssistant: extracted skill result');
-
-      // Extract the actual result from SkillOutput
-      const result = (skillOutputData?.result ?? {}) as LovdataSkillSearchResult;
-      // Reduced logging
-      let serperSkillMeta: Record<string, unknown> | undefined;
-
-      const primaryHits = Array.isArray(result.hits) ? result.hits.length : 0;
-
-      // Always run Serper when available to include both Lovdata and web results
-      const ENABLE_SERPER = true; // Re-enabled - Serper skill is now working
-      if (ENABLE_SERPER && services.serper) {
-        logger.info({ question, hasSerper: !!services.serper }, 'runAssistant: starting Serper skill execution');
-        try {
-          logger.info('runAssistant: calling Serper orchestrator.run');
-          const { result: serperSkillOutput } = await withTrace<SkillOutput>(
-            {
-              name: 'skill.serperSearch',
-              runType: 'tool',
-              inputs: {
-                action: 'search',
-                query: question
-              },
-              tags: ['skill', 'serper'],
-              getOutputs: (output: SkillOutput) => {
-                const organicCount = Array.isArray((output.result as any)?.organic)
-                  ? (output.result as any).organic.length
-                  : undefined;
-                return { organicCount };
-              }
-            },
-            async () =>
-              orchestrator.run(
-                {
-                  input: {
-                    action: 'search',
-                    query: question,
-                    site: env.SERPER_SITE_FILTER ?? 'lovdata.no'
-                  },
-                  hints: { preferredSkill: 'lovdata-serper' }
-                },
-                ctx
-              )
-          );
-
-          logger.info({
-            hasResult: !!serperSkillOutput,
-            resultType: typeof serperSkillOutput
-          }, 'runAssistant: Serper orchestrator.run completed');
-
-          const serperResult = (serperSkillOutput.result ?? {}) as {
-            organic?: Array<{
-              title?: string | null;
-              link?: string | null;
-              snippet?: string | null;
-              date?: string | null;
-            }>;
-            site?: string | null;
-          };
-
-          const organicResults = Array.isArray(serperResult.organic) ? serperResult.organic : [];
-          if (organicResults.length > 0) {
-            const providerLabel = serperResult.site ? `serper:${serperResult.site}` : 'serper';
-            const existingFallbackOrganic = Array.isArray(result.fallback?.organic) ? result.fallback!.organic : [];
-            const dedupedOrganic: Array<{
-              title: string | null;
-              link: string | null;
-              snippet: string | null;
-              date: string | null;
-            }> = [];
-            const seenKeys = new Set<string>();
-
-            const pushIfNew = (item: { title: string | null; link: string | null; snippet: string | null; date: string | null }) => {
-              const key = (item.link ?? item.title ?? '').toLowerCase();
-              if (!seenKeys.has(key)) {
-                seenKeys.add(key);
-                dedupedOrganic.push(item);
-              }
-            };
-
-            for (const existing of existingFallbackOrganic) {
-              pushIfNew({
-                title: existing.title ?? null,
-                link: existing.link ?? null,
-                snippet: existing.snippet ?? null,
-                date: existing.date ?? null
-              });
-            }
-
-            for (const fresh of organicResults) {
-              pushIfNew({
-                title: fresh.title ?? null,
-                link: fresh.link ?? null,
-                snippet: fresh.snippet ?? null,
-                date: fresh.date ?? null
-              });
-            }
-
-            const providerParts = [
-              ...(result.fallback?.provider ? result.fallback.provider.split(/\s*\|\s*/) : []),
-              providerLabel
-            ].filter(Boolean);
-            const providerCombined = Array.from(new Set(providerParts)).join(' | ');
-
-            result.fallback = {
-              provider: providerCombined || providerLabel,
-              organic: dedupedOrganic
-            };
-
-            serperSkillMeta =
-              serperSkillOutput.meta ??
-              ({
-                site: serperResult.site ?? null,
-                organicResults: organicResults.length
-              } as Record<string, unknown>);
-            logger.info({
-              organicResultsCount: organicResults.length,
-              providerCombined
-            }, 'runAssistant: Serper results processed');
-          } else {
-            logger.info('runAssistant: Serper returned no organic results');
-          }
-        } catch (error) {
-          logger.error({ err: error, stack: error instanceof Error ? error.stack : undefined }, 'Serper skill execution failed');
+      // Prepare function definitions for the agent
+      const functions = [
+        {
+          name: lovdataSearchFunction.name,
+          description: lovdataSearchFunction.description,
+          parameters: lovdataSearchFunction.parameters
+        },
+        {
+          name: lovdataSerperFunction.name,
+          description: lovdataSerperFunction.description,
+          parameters: lovdataSerperFunction.parameters
         }
-        logger.info('runAssistant: Serper skill execution completed');
+      ];
+
+      logger.info('runAssistant: starting agent-driven function calling');
+      
+      // Agent-driven function calling loop
+      let agentEvidence: AgentEvidence[] = [];
+      let agentOutput: AgentOutput | undefined;
+      let usedAgent = false;
+      const maxAgentIterations = 5; // Prevent infinite loops
+      const functionResults: AgentFunctionResult[] = [];
+      
+      // Get agent
+      const agent = getAgent();
+      if (!agent) {
+        logger.warn('runAssistant: no agent available, cannot use function calling');
+        // Fallback to empty results if no agent
+        agentEvidence = [];
       } else {
-        if (!ENABLE_SERPER) {
-          logger.info('runAssistant: Serper skill disabled for testing');
-        } else {
-          logger.info('runAssistant: Serper service not available, skipping');
+        logger.info('runAssistant: agent available, starting function calling loop');
+        
+        for (let iteration = 0; iteration < maxAgentIterations; iteration++) {
+          logger.info({ iteration: iteration + 1, maxIterations: maxAgentIterations }, 'runAssistant: agent iteration');
+          
+          try {
+            // Call agent with current evidence and functions
+            const agentInput = {
+              question: options.question,
+              evidence: agentEvidence,
+              locale: options.locale,
+              functions: functions,
+              functionResults: functionResults.length > 0 ? functionResults : undefined
+            };
+            
+            logger.info({
+              evidenceCount: agentEvidence.length,
+              functionResultsCount: functionResults.length,
+              iteration: iteration + 1
+            }, 'runAssistant: calling agent.generate');
+            
+            const agentResult = await agent.generate(agentInput);
+            
+            // Check if agent wants to call a function
+            if (agentResult.functionCalls && agentResult.functionCalls.length > 0) {
+              logger.info({
+                functionCallsCount: agentResult.functionCalls.length,
+                functionNames: agentResult.functionCalls.map(fc => fc.name)
+              }, 'runAssistant: agent requested function calls');
+              
+              // Execute each function call
+              for (const functionCall of agentResult.functionCalls) {
+                try {
+                  if (functionCall.name === 'search_lovdata_legal_documents') {
+                    // Execute lovdata-api skill
+                    const searchParams = JSON.parse(functionCall.arguments);
+                    logger.info({ searchParams }, 'runAssistant: executing lovdata-api search');
+                    
+                    const skillResult = await orchestrator.run(
+                      {
+                        input: {
+                          action: 'searchPublicData',
+                          query: searchParams.query,
+                          lawType: searchParams.lawType,
+                          year: searchParams.year,
+                          ministry: searchParams.ministry,
+                          page: searchParams.page || page,
+                          pageSize: searchParams.pageSize || pageSize
+                        }
+                      },
+                      ctx
+                    );
+                    
+                    // Convert skill results to evidence
+                    const skillOutputData = skillResult.result ?? ({} as any);
+                    const lovdataResult = (skillOutputData.result ?? {}) as LovdataSkillSearchResult;
+                    const newEvidence = convertLovdataSkillResultsToEvidence(lovdataResult.hits ?? []);
+                    
+                    // Deduplicate evidence by (filename, member) to avoid duplicates
+                    const existingKeys = new Set(agentEvidence.map(e => `${e.metadata?.filename}:${e.metadata?.member}`));
+                    const uniqueNewEvidence = newEvidence.filter(e => {
+                      const key = `${e.metadata?.filename}:${e.metadata?.member}`;
+                      if (existingKeys.has(key)) {
+                        return false;
+                      }
+                      existingKeys.add(key);
+                      return true;
+                    });
+                    
+                    agentEvidence = [...agentEvidence, ...uniqueNewEvidence];
+                    
+                    // Format function result with better guidance for agent
+                    const formattedResult = {
+                      ...lovdataResult,
+                      _guidance: {
+                        hitsFound: lovdataResult.hits?.length ?? 0,
+                        totalHits: lovdataResult.totalHits ?? 0,
+                        message: lovdataResult.hits && lovdataResult.hits.length > 0
+                          ? `Found ${lovdataResult.hits.length} result(s). Use these to answer the user's question.`
+                          : `No results found for this search. Consider trying a different law type, year, or broader search terms.`
+                      }
+                    };
+                    
+                    // Add to function results for next iteration
+                    functionResults.push({
+                      name: functionCall.name,
+                      result: formattedResult,
+                      toolCallId: functionCall.toolCallId
+                    });
+                    
+                    logger.info({
+                      hitsCount: lovdataResult.hits?.length ?? 0,
+                      newEvidenceCount: newEvidence.length
+                    }, 'runAssistant: lovdata-api search completed');
+                    
+                  } else if (functionCall.name === 'search_lovdata_legal_practice') {
+                    // Execute lovdata-serper skill
+                    const searchParams = JSON.parse(functionCall.arguments);
+                    logger.info({ searchParams }, 'runAssistant: executing serper search');
+                    
+                    const skillResult = await orchestrator.run(
+                      {
+                        input: {
+                          action: 'search',
+                          query: searchParams.query,
+                          num: searchParams.num || 10,
+                          site: 'lovdata.no'
+                        },
+                        hints: { preferredSkill: 'lovdata-serper' }
+                      },
+                      ctx
+                    );
+                    
+                    // Convert serper results to evidence
+                    const skillOutputData = skillResult.result ?? ({} as any);
+                    const serperResult = (skillOutputData.result ?? {}) as { 
+                      organic?: Array<{ 
+                        title?: string | null; 
+                        link?: string | null; 
+                        snippet?: string | null; 
+                        date?: string | null 
+                      }> 
+                    };
+                    const newEvidence = convertSerperResultsToEvidence(serperResult?.organic ?? []);
+                    
+                    // Deduplicate evidence by link to avoid duplicates
+                    const existingLinks = new Set(agentEvidence.map(e => e.link).filter(Boolean));
+                    const uniqueNewEvidence = newEvidence.filter(e => {
+                      if (!e.link || existingLinks.has(e.link)) {
+                        return false;
+                      }
+                      existingLinks.add(e.link);
+                      return true;
+                    });
+                    
+                    agentEvidence = [...agentEvidence, ...uniqueNewEvidence];
+                    
+                    // Format function result with better guidance for agent
+                    const organicResults = serperResult?.organic ?? [];
+                    const formattedResult = {
+                      ...serperResult,
+                      _guidance: {
+                        resultsFound: organicResults.length,
+                        message: organicResults.length > 0
+                          ? `Found ${organicResults.length} legal practice result(s). These provide practical examples and case law interpretations.`
+                          : `No legal practice results found. The search focused on rettsavgjørelser, Lovtidend, Trygderetten, and related sources.`
+                      }
+                    };
+                    
+                    // Add to function results for next iteration
+                    functionResults.push({
+                      name: functionCall.name,
+                      result: formattedResult,
+                      toolCallId: functionCall.toolCallId
+                    });
+                    
+                    logger.info({
+                      organicCount: serperResult?.organic?.length ?? 0,
+                      newEvidenceCount: newEvidence.length
+                    }, 'runAssistant: serper search completed');
+                  }
+                } catch (functionError) {
+                  logger.error({
+                    err: functionError,
+                    functionName: functionCall.name
+                  }, 'runAssistant: function execution failed');
+                  // Continue with other function calls
+                }
+              }
+              
+              // Continue loop to let agent process new evidence
+              continue;
+            } else {
+              // Agent has final answer
+              agentOutput = agentResult;
+              usedAgent = true;
+              logger.info('runAssistant: agent provided final answer');
+              break;
+            }
+          } catch (agentError) {
+            logger.error({
+              err: agentError,
+              iteration: iteration + 1
+            }, 'runAssistant: agent iteration failed');
+            // Break on error - will fall back to heuristic summary
+            break;
+          }
+        }
+        
+        if (!agentOutput) {
+          logger.warn('runAssistant: agent did not provide final answer after iterations');
         }
       }
+      
+      // Build result structure for compatibility with existing code
+      const result: LovdataSkillSearchResult = {
+        hits: [],
+        searchedFiles: [],
+        totalHits: agentEvidence.length,
+        page: page,
+        pageSize: pageSize,
+        totalPages: Math.max(1, Math.ceil(agentEvidence.length / pageSize))
+      };
 
-      logger.info('runAssistant: building evidence');
-      const evidence = buildEvidence(result);
-      logger.info({ evidenceCount: evidence.length }, 'runAssistant: evidence built');
-
-      // Always update links for HTML content, regardless of agent usage
-      const evidenceWithUpdatedLinks = await updateLinksForHtmlContent(evidence, services);
+      // Update links for HTML content
+      const evidenceWithUpdatedLinks = await updateLinksForHtmlContent(agentEvidence, services);
       logger.info({ updatedCount: evidenceWithUpdatedLinks.length }, 'runAssistant: links updated');
+      
+      // Update agentEvidence with updated links
+      agentEvidence = evidenceWithUpdatedLinks;
 
-      let agentEvidence: AgentEvidence[] = evidenceWithUpdatedLinks;
       const pagination = {
         page: result.page ?? page,
         pageSize: result.pageSize ?? pageSize,
@@ -321,110 +337,7 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
         totalPages: result.totalPages ?? Math.max(1, Math.ceil((result.totalHits ?? evidenceWithUpdatedLinks.length) / pageSize))
       };
 
-      const combinedSkillMeta =
-        skillOutput.meta || serperSkillMeta
-          ? {
-            ...(skillOutput.meta ?? {}),
-            ...(serperSkillMeta ? { serper: serperSkillMeta } : {})
-          }
-          : undefined;
-
-      logger.info('runAssistant: getting agent');
-      const agent = getAgent();
-      logger.info({ hasAgent: !!agent }, 'runAssistant: agent obtained');
-
-      let agentOutput: AgentOutput | undefined;
-      let usedAgent = false;
-
-      if (agent && evidenceWithUpdatedLinks.length > 0) {
-        // Check time before hydrating evidence - this can be slow
-        const timeBeforeHydration = performance.now() - started;
-        const maxTimeForHydration = 50000; // 50 seconds - allows 10s for hydration before 60s Vercel Pro limit
-
-        if (timeBeforeHydration > maxTimeForHydration) {
-          logger.warn({
-            timeUsedSoFar: Math.round(timeBeforeHydration),
-            maxTimeForHydration,
-            evidenceCount: evidenceWithUpdatedLinks.length
-          }, 'runAssistant: skipping evidence hydration - too much time already used, using snippets only');
-          // Use evidence without full content hydration
-          agentEvidence = limitAgentEvidence(evidenceWithUpdatedLinks.map(item => ({
-            ...item,
-            content: null // No full content, just snippets
-          })));
-        } else {
-          logger.info({
-            evidenceCount: evidenceWithUpdatedLinks.length,
-            timeUsedSoFar: Math.round(timeBeforeHydration)
-          }, 'runAssistant: hydrating evidence content for agent');
-          agentEvidence = limitAgentEvidence(await hydrateEvidenceContent(evidenceWithUpdatedLinks, services));
-          logger.info({ hydratedCount: agentEvidence.length }, 'runAssistant: evidence content hydrated');
-        }
-        try {
-          const traceEvidenceSample = agentEvidence.slice(0, Math.min(agentEvidence.length, 5)).map(item => ({
-            id: item.id,
-            source: item.source,
-            title: item.title,
-            snippet: item.snippet
-          }));
-
-          logger.info({
-            question,
-            evidenceCount: agentEvidence.length,
-            sampleCount: traceEvidenceSample.length
-          }, 'runAssistant: calling OpenAI agent');
-
-          // Check if we've already used too much time - if so, skip OpenAI and use fallback
-          // Vercel Pro has 60s timeout - allow OpenAI if we've used < 50s (leaves 10s for OpenAI + buffer)
-          const timeUsedSoFar = performance.now() - started;
-          const maxTimeForOpenAI = 50000; // 50 seconds - allows OpenAI call (5s) with 5s buffer before 60s limit
-
-          if (timeUsedSoFar > maxTimeForOpenAI) {
-            logger.warn({
-              timeUsedSoFar: Math.round(timeUsedSoFar),
-              maxTimeForOpenAI,
-              estimatedTotal: Math.round(timeUsedSoFar + 5000) // Time if we add OpenAI call
-            }, 'runAssistant: skipping OpenAI call - too much time already used, using fallback');
-            // Skip OpenAI call and use fallback (agentOutput will remain undefined)
-          } else {
-            const estimatedTimeRemaining = 60000 - timeUsedSoFar; // Vercel Pro 60s limit
-            logger.info({
-              timeUsedSoFar: Math.round(timeUsedSoFar),
-              estimatedTimeRemaining: Math.round(estimatedTimeRemaining),
-              maxTimeForOpenAI,
-              estimatedTotalIfOpenAI: Math.round(timeUsedSoFar + 5000)
-            }, 'runAssistant: proceeding with OpenAI call - time check passed');
-            const agentCall = await withTrace<AgentOutput>(
-              {
-                name: 'agent.answer',
-                runType: 'llm',
-                inputs: {
-                  question,
-                  evidence: traceEvidenceSample
-                },
-                tags: ['assistant', 'openai'],
-                getOutputs: (output: AgentOutput) => ({ answer: output.answer })
-              },
-              async () => {
-                logger.info('runAssistant: calling agent.generate');
-                const result = await agent.generate({ question, evidence: agentEvidence, locale: options.locale });
-                logger.info({
-                  answerLength: result.answer.length,
-                  citationsCount: result.citations.length,
-                  model: result.model
-                }, 'runAssistant: agent.generate completed');
-                return result;
-              }
-            );
-
-            agentOutput = agentCall.result;
-            usedAgent = true;
-            logger.info('runAssistant: agent output obtained');
-          }
-        } catch (error) {
-          logger.error({ err: error }, 'OpenAI agent failed; falling back to heuristic summary');
-        }
-      }
+      const combinedSkillMeta = undefined; // Not used in agent-driven flow
 
       logger.info({ usedAgent, hasAgentOutput: !!agentOutput }, 'runAssistant: building response');
 
@@ -432,9 +345,9 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
       if (usedAgent && agentOutput) {
         logger.info('runAssistant: building response with agent output');
         response = {
-          answer: agentOutput.answer,
+          answer: agentOutput.answer ?? 'Jeg klarte ikke å generere et svar.',
           evidence: evidenceWithUpdatedLinks,
-          citations: normaliseCitations(agentOutput.citations, evidenceWithUpdatedLinks, pagination),
+          citations: normaliseCitations(agentOutput.citations ?? [], evidenceWithUpdatedLinks, pagination),
           pagination,
           metadata: {
             fallbackProvider: result.fallback?.provider ?? null,
@@ -452,7 +365,7 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
         }, 'runAssistant: response built with agent output');
       } else {
         logger.info('runAssistant: building fallback response');
-        const fallbackAnswer = buildFallbackAnswer(question, evidenceWithUpdatedLinks, result.fallback?.provider ?? null);
+        const fallbackAnswer = buildFallbackAnswer(question, evidenceWithUpdatedLinks, null);
         response = {
           answer: fallbackAnswer,
           evidence: evidenceWithUpdatedLinks,
@@ -462,7 +375,7 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
           }),
           pagination,
           metadata: {
-            fallbackProvider: result.fallback?.provider ?? null,
+            fallbackProvider: null,
             skillMeta: combinedSkillMeta,
             agentModel: null,
             usedAgent: false,
@@ -955,6 +868,45 @@ function buildFallbackAnswer(question: string, evidence: AgentEvidence[], provid
   const intro = 'Her er en oppsummering basert på tilgjengelige dokumenter:';
   const bullets = evidence.slice(0, 5).map(item => `- ${item.title ?? 'Uten tittel'}${item.source === 'lovdata' ? ' (Lovdata)' : ''}`);
   return `${intro}\n${bullets.join('\n')}`;
+}
+
+// Helper function to convert lovdata-api skill results to evidence
+function convertLovdataSkillResultsToEvidence(hits: Array<{
+  filename: string;
+  member: string;
+  title?: string | null;
+  date?: string | null;
+  snippet: string;
+}>): AgentEvidence[] {
+  return hits.map((hit, index) => ({
+    id: `lovdata-${index + 1}`,
+    source: 'lovdata',
+    title: hit.title ?? hit.filename ?? 'Uten tittel',
+    snippet: hit.snippet,
+    date: hit.date ?? null,
+    link: buildXmlViewerUrl(hit.filename, hit.member),
+    metadata: {
+      filename: hit.filename,
+      member: hit.member
+    }
+  }));
+}
+
+// Helper function to convert serper skill results to evidence
+function convertSerperResultsToEvidence(organic: Array<{
+  title?: string | null;
+  link?: string | null;
+  snippet?: string | null;
+  date?: string | null;
+}>): AgentEvidence[] {
+  return organic.map((item, index) => ({
+    id: `serper-${index + 1}`,
+    source: 'serper:lovdata.no',
+    title: item.title ?? 'Uten tittel',
+    snippet: item.snippet ?? null,
+    date: item.date ?? null,
+    link: item.link ?? null
+  }));
 }
 
 function buildXmlViewerUrl(
