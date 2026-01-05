@@ -618,34 +618,81 @@ export class SupabaseArchiveStore {
               // Call the RPC function for results
               const rpcCallPromise = this.supabase.rpc(rpcFunctionName, rpcParams);
 
-              // Also get the total count separately
-              // Since we're searching chunks, we need to count distinct documents that have chunks matching the filters
-              // For now, we'll use a simpler approach: count documents that match the search and filters
-              // Note: This may not be perfectly accurate since chunks might not exist for all documents
-              let countQueryBuilder = this.supabase
-                .from('lovdata_documents')
-                .select('id', { count: 'exact', head: true })
-                .textSearch('tsv_content', tsQuery, {
-                  type: 'plain',
-                  config: 'norwegian'
-                });
+              // Get the total count separately
+              // For chunk-based search, count distinct documents from matching chunks
+              // For document-based search, count documents directly
+              let countPromise: Promise<{ count: number | null }>;
               
-              // Apply the same filters as the RPC function (but on documents, not chunks)
-              // This is a best-effort count since we're searching chunks but counting documents
-              if (options.filters?.lawType) {
-                countQueryBuilder = countQueryBuilder.eq('law_type', options.filters.lawType);
-              }
-              if (options.filters?.year) {
-                countQueryBuilder = countQueryBuilder.eq('year', options.filters.year);
-              }
-              if (options.filters?.ministry) {
-                countQueryBuilder = countQueryBuilder.eq('ministry', options.filters.ministry);
+              if (rpcFunctionName === 'search_document_chunks_hybrid') {
+                // Count distinct documents from chunks matching the search criteria
+                // Build query matching the same filters as the RPC function
+                let chunkCountQuery = this.supabase
+                  .from('document_chunks')
+                  .select('document_id');
+                
+                // Apply FTS query if available
+                if (tsQuery && tsQuery.trim() !== '') {
+                  chunkCountQuery = chunkCountQuery.textSearch('tsv_content', tsQuery, {
+                    type: 'plain',
+                    config: 'norwegian'
+                  });
+                }
+                
+                // Apply the same filters as the RPC function
+                if (options.filters?.lawType) {
+                  chunkCountQuery = chunkCountQuery.eq('law_type', options.filters.lawType);
+                }
+                if (options.filters?.year) {
+                  chunkCountQuery = chunkCountQuery.eq('year', options.filters.year);
+                }
+                if (options.filters?.ministry) {
+                  chunkCountQuery = chunkCountQuery.eq('ministry', options.filters.ministry);
+                }
+                
+                // Note: This count is based on FTS matches only. The actual hybrid search combines
+                // both FTS and vector search results via RRF. For perfect accuracy, we would need
+                // to count chunks matching EITHER FTS OR vector search, but that requires running
+                // a similarity search which is expensive. This approximation is still much more
+                // accurate than counting documents, and provides a reasonable estimate for pagination.
+                countPromise = chunkCountQuery.then((result) => {
+                  if (result.error) {
+                    this.logs.warn({ err: result.error }, 'Chunk count query failed, using 0');
+                    return { count: 0 };
+                  }
+                  // Count distinct document_ids
+                  const documentIds = new Set((result.data || []).map((row: any) => row.document_id));
+                  return { count: documentIds.size };
+                });
+              } else {
+                // Document-based search: count documents directly
+                let countQueryBuilder = this.supabase
+                  .from('lovdata_documents')
+                  .select('id', { count: 'exact', head: true })
+                  .textSearch('tsv_content', tsQuery, {
+                    type: 'plain',
+                    config: 'norwegian'
+                  });
+                
+                // Apply the same filters as the RPC function
+                if (options.filters?.lawType) {
+                  countQueryBuilder = countQueryBuilder.eq('law_type', options.filters.lawType);
+                }
+                if (options.filters?.year) {
+                  countQueryBuilder = countQueryBuilder.eq('year', options.filters.year);
+                }
+                if (options.filters?.ministry) {
+                  countQueryBuilder = countQueryBuilder.eq('ministry', options.filters.ministry);
+                }
+                
+                countPromise = countQueryBuilder.then((result) => ({
+                  count: result.count ?? 0
+                }));
               }
 
               // Execute both queries in parallel
               const [rpcResult, countResult] = await Promise.all([
                 rpcCallPromise,
-                countQueryBuilder
+                countPromise
               ]);
 
               // Handle RPC result
