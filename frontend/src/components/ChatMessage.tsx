@@ -2,6 +2,51 @@ import type { AssistantRunResponse } from '../services/api';
 import type { Message } from '../types/chat';
 import './ChatMessage.css';
 
+// Helper function to render message content with clickable links
+function renderMessageContent(content: string): React.ReactNode {
+  // Check if content contains HTML links
+  const linkRegex = /<a\s+href=["']([^"']+)["'][^>]*>([^<]+)<\/a>/gi;
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match;
+  
+  while ((match = linkRegex.exec(content)) !== null) {
+    // Add text before the link
+    if (match.index > lastIndex) {
+      parts.push(content.substring(lastIndex, match.index));
+    }
+    
+    // Add the link as a clickable element
+    const href = match[1];
+    const linkText = match[2];
+    parts.push(
+      <a 
+        key={match.index} 
+        href={href} 
+        target="_blank" 
+        rel="noreferrer noopener"
+        className="message-link"
+      >
+        {linkText}
+      </a>
+    );
+    
+    lastIndex = match.index + match[0].length;
+  }
+  
+  // Add remaining text after the last link
+  if (lastIndex < content.length) {
+    parts.push(content.substring(lastIndex));
+  }
+  
+  // If no links were found, return content as-is
+  if (parts.length === 0) {
+    return content;
+  }
+  
+  return <>{parts}</>;
+}
+
 interface ChatMessageProps {
   message: Message;
 }
@@ -69,7 +114,9 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
             {message.timestamp.toLocaleTimeString()}
           </span>
         </div>
-        <div className="message-text">{message.content}</div>
+        <div className="message-text">
+          {renderMessageContent(message.content)}
+        </div>
         {!isUser && renderAssistantExtras()}
       </div>
     </div>

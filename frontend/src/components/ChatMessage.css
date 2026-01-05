@@ -83,6 +83,30 @@
   border-color: #1a2332;
 }
 
+.message-link {
+  color: #1d4ed8;
+  text-decoration: underline;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.message-link:hover {
+  color: #1e40af;
+  text-decoration: none;
+}
+
+.message-link:visited {
+  color: #7c3aed;
+}
+
+.chat-message.user .message-link {
+  color: #60a5fa;
+}
+
+.chat-message.user .message-link:hover {
+  color: #93c5fd;
+}
+
 .skill-output {
   margin-top: 12px;
   padding: 12px 14px;
