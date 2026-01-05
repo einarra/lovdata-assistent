@@ -249,14 +249,16 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
                   } else if (functionCall.name === 'search_lovdata_legal_practice') {
                     // Execute lovdata-serper skill
                     const searchParams = JSON.parse(functionCall.arguments);
-                    logger.info({ searchParams }, 'runAssistant: executing serper search');
+                    // Increase num to get more results - we'll filter to document links anyway
+                    const numResults = Math.max(searchParams.num || 10, 20);
+                    logger.info({ searchParams, numResults }, 'runAssistant: executing serper search');
                     
                     const skillResult = await orchestrator.run(
                       {
                         input: {
                           action: 'search',
                           query: searchParams.query,
-                          num: searchParams.num || 10,
+                          num: numResults, // Request more results to increase chance of getting document links
                           site: 'lovdata.no'
                         },
                         hints: { preferredSkill: 'lovdata-serper' }
@@ -287,10 +289,18 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
                       organicIsArray: Array.isArray(serperResult.organic),
                       organicSample: serperResult.organic?.[0] ? {
                         title: serperResult.organic[0].title,
+                        link: serperResult.organic[0].link,
                         hasLink: !!serperResult.organic[0].link,
                         hasSnippet: !!serperResult.organic[0].snippet,
-                        isDocument: serperResult.organic[0].isDocument
-                      } : null
+                        isDocument: serperResult.organic[0].isDocument,
+                        isDocumentLinkCheck: serperResult.organic[0].link ? SerperClient.isDocumentLink(serperResult.organic[0].link) : false
+                      } : null,
+                      allOrganicResults: serperResult.organic?.map(item => ({
+                        title: item.title,
+                        link: item.link,
+                        isDocument: item.isDocument,
+                        isDocumentLinkCheck: item.link ? SerperClient.isDocumentLink(item.link) : false
+                      })) ?? []
                     }, 'runAssistant: serper result structure');
                     
                     const newEvidence = convertSerperResultsToEvidence(serperResult.organic ?? []);
@@ -1034,12 +1044,22 @@ function convertSerperResultsToEvidence(organic: Array<{
 }>): AgentEvidence[] {
   let evidenceIndex = 0;
   
-  return organic
+  logger.info({
+    totalOrganicResults: organic.length,
+    organicResults: organic.map(item => ({
+      title: item.title,
+      link: item.link,
+      isDocument: item.isDocument,
+      isDocumentLinkCheck: item.link ? SerperClient.isDocumentLink(item.link) : false
+    }))
+  }, 'convertSerperResultsToEvidence: processing organic results');
+  
+  const filtered = organic
     .filter((item) => {
       // Only include items with valid document links
       // Filter out search pages, list pages, and other non-document links
       if (!item.link) {
-        logger.debug({
+        logger.info({
           title: item.title,
           reason: 'no_link'
         }, 'convertSerperResultsToEvidence: filtering out item with no link');
@@ -1050,24 +1070,34 @@ function convertSerperResultsToEvidence(organic: Array<{
       const isDocument = item.isDocument ?? SerperClient.isDocumentLink(item.link);
       
       if (!isDocument) {
-        logger.debug({
+        logger.info({
           link: item.link,
           title: item.title,
-          isDocument: item.isDocument
+          isDocument: item.isDocument,
+          isDocumentLinkCheck: SerperClient.isDocumentLink(item.link)
         }, 'convertSerperResultsToEvidence: filtering out non-document link');
         return false;
       }
       
       return true;
-    })
-    .map((item) => ({
-      id: `serper-${++evidenceIndex}`,
-      source: 'serper:lovdata.no',
-      title: item.title ?? 'Uten tittel',
-      snippet: item.snippet ?? null,
-      date: item.date ?? null,
-      link: item.link! // Safe to use ! here because we filtered out null links
-    }));
+    });
+  
+  logger.info({
+    filteredCount: filtered.length,
+    filteredResults: filtered.map(item => ({
+      title: item.title,
+      link: item.link
+    }))
+  }, 'convertSerperResultsToEvidence: after filtering');
+  
+  return filtered.map((item) => ({
+    id: `serper-${++evidenceIndex}`,
+    source: 'serper:lovdata.no',
+    title: item.title ?? 'Uten tittel',
+    snippet: item.snippet ?? null,
+    date: item.date ?? null,
+    link: item.link! // Safe to use ! here because we filtered out null links
+  }));
 }
 
 function buildXmlViewerUrl(
