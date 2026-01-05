@@ -544,7 +544,7 @@ export class SupabaseArchiveStore {
             query_embedding: queryEmbedding,  // Pass as array directly
             result_limit: limit,
             result_offset: offset,
-            rrf_k: options.rrfK ?? env.RRF_K  // Use provided RRF k or environment default
+            rrf_k: options.rrfK ?? env.RRF_K,  // Use provided RRF k or environment default
             filter_year: options.filters?.year ?? null,
             filter_law_type: options.filters?.lawType ?? null,
             filter_ministry: options.filters?.ministry ?? null
