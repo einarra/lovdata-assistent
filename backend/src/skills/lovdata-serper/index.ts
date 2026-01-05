@@ -74,20 +74,37 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
     };
   }
   
+  // Map documentType to specific inurl patterns for document links
+  // Instead of searching on register pages (which return search pages), 
+  // we search on lovdata.no with specific document URL patterns
+  const documentTypePatterns: Record<DocumentType, string[]> = {
+    lov: ['/dokument/', '/lov/', '/lover/'],
+    forskrift: ['/dokument/', '/forskrift/', '/forskrifter/'],
+    avgjørelse: ['/dokument/', '/avgjørelser/', '/avgjorelse/'],
+    kunngjøring: ['/dokument/', '/lovtidend/']
+  };
+  
+  const patternsForType = documentType ? documentTypePatterns[documentType] : documentTypePatterns.avgjørelse;
+  
   logger.info({ 
     query: input.query, 
     documentType,
-    registerSite
-  }, 'lovdata-serper: calling client.search with register site');
+    registerSite,
+    patternsForType,
+    searchStrategy: 'lovdata.no with document patterns'
+  }, 'lovdata-serper: calling client.search with document patterns');
   
   let response;
   try {
-    // Search on the specific register site
+    // Search on lovdata.no (not register pages) with targetDocuments to get actual document links
+    // This ensures we get links to documents, not search/register pages
     response = await client.search(input.query, {
       num: input.num,
       gl: input.gl ?? 'no',
       hl: input.hl ?? 'no',
-      site: registerSite
+      site: 'lovdata.no',
+      targetDocuments: true, // This will use inurl patterns to find document links
+      documentTypePatterns: patternsForType // Prioritize specific patterns for this document type
     });
     
     logger.info({ 

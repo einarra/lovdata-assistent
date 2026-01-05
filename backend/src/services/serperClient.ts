@@ -6,6 +6,7 @@ export type SerperSearchOptions = {
   hl?: string;
   site?: string;
   targetDocuments?: boolean; // If true, prioritize document pages (lov, forskrift, dokument)
+  documentTypePatterns?: string[]; // Specific URL patterns to prioritize for this search
 };
 
 export type SerperResponse = {
@@ -40,22 +41,32 @@ export class SerperClient {
       const normalizedSite = options.site.replace(/^https?:\/\//, '').replace(/\/$/, '');
       
       if (options.targetDocuments) {
-        // Target common Lovdata document URL patterns:
-        // - /dokument/ (document pages)
-        // - /lov/ (laws)
-        // - /forskrift/ (regulations)
-        // - /rundskriv/ (circulars)
-        // - /vedtak/ (decisions)
-        // - /avgjorelse/ (decisions)
-        // - /lokaleForskrifter/ (local regulations)
-        // - /lovtidend/ (law gazette)
-        // - /eosavtalen/ (EEA agreement)
-        // - /traktater/ (treaties)
-        // - /trygderetten/ (social security court)
-        // - /tariffavtaler/ (collective agreements)
-        // - /husleietvistutvalget/ (rent dispute committee)
-        // - /sph2025/ (State Personnel Handbook 2025)
-        siteQuery = `site:${normalizedSite} (inurl:/dokument/ OR inurl:/lover/ OR inurl:/lov/ OR inurl:/forskrifter/ OR inurl:/forskrift/ OR inurl:/avgjørelser/ OR inurl:/avgjorelse/ OR inurl:/rundskriv/ OR inurl:/vedtak/ OR inurl:/lokaleForskrifter/ OR inurl:/lovtidend/ OR inurl:/eosavtalen/ OR inurl:/traktater/ OR inurl:/trygderetten/ OR inurl:/tariffavtaler/ OR inurl:/husleietvistutvalget/ OR inurl:/sph2025/) `;
+        // If specific document type patterns are provided, use those (prioritized)
+        // Otherwise use all common document patterns
+        if (options.documentTypePatterns && options.documentTypePatterns.length > 0) {
+          // Use specific patterns for this document type, but also include /dokument/ as fallback
+          const patterns = [...new Set([...options.documentTypePatterns, '/dokument/'])];
+          const patternQueries = patterns.map(pattern => `inurl:${pattern}`).join(' OR ');
+          siteQuery = `site:${normalizedSite} (${patternQueries}) -inurl:/register/ `;
+        } else {
+          // Target common Lovdata document URL patterns:
+          // - /dokument/ (document pages)
+          // - /lov/ (laws)
+          // - /forskrift/ (regulations)
+          // - /rundskriv/ (circulars)
+          // - /vedtak/ (decisions)
+          // - /avgjorelse/ (decisions)
+          // - /lokaleForskrifter/ (local regulations)
+          // - /lovtidend/ (law gazette)
+          // - /eosavtalen/ (EEA agreement)
+          // - /traktater/ (treaties)
+          // - /trygderetten/ (social security court)
+          // - /tariffavtaler/ (collective agreements)
+          // - /husleietvistutvalget/ (rent dispute committee)
+          // - /sph2025/ (State Personnel Handbook 2025)
+          // Exclude /register/ to avoid search pages
+          siteQuery = `site:${normalizedSite} (inurl:/dokument/ OR inurl:/lover/ OR inurl:/lov/ OR inurl:/forskrifter/ OR inurl:/forskrift/ OR inurl:/avgjørelser/ OR inurl:/avgjorelse/ OR inurl:/rundskriv/ OR inurl:/vedtak/ OR inurl:/lokaleForskrifter/ OR inurl:/lovtidend/ OR inurl:/eosavtalen/ OR inurl:/traktater/ OR inurl:/trygderetten/ OR inurl:/tariffavtaler/ OR inurl:/husleietvistutvalget/ OR inurl:/sph2025/) -inurl:/register/ `;
+        }
       } else {
         siteQuery = `site:${normalizedSite} `;
       }
