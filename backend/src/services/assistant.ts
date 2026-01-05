@@ -552,11 +552,14 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
       // Update agentEvidence with updated links
       agentEvidence = evidenceWithUpdatedLinks;
 
+      // Calculate pagination based on all evidence (before filtering to cited evidence)
+      // This ensures pagination reflects the total available evidence, not just what's cited
+      const totalEvidenceCount = evidenceWithUpdatedLinks.length;
       const pagination = {
         page: result.page ?? page,
         pageSize: result.pageSize ?? pageSize,
-        totalHits: result.totalHits ?? evidenceWithUpdatedLinks.length,
-        totalPages: result.totalPages ?? Math.max(1, Math.ceil((result.totalHits ?? evidenceWithUpdatedLinks.length) / pageSize))
+        totalHits: result.totalHits ?? totalEvidenceCount,
+        totalPages: result.totalPages ?? Math.max(1, Math.ceil((result.totalHits ?? totalEvidenceCount) / pageSize))
       };
 
       const combinedSkillMeta = undefined; // Not used in agent-driven flow
@@ -580,10 +583,36 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
       let response: AssistantRunResponse;
       if (usedAgent && agentOutput) {
         logger.info('runAssistant: building response with agent output');
+        
+        // Normalize citations first to get the list of evidence IDs that agent actually cited
+        const normalizedCitations = normaliseCitations(agentOutput.citations ?? [], evidenceWithUpdatedLinks, pagination);
+        
+        // Filter evidence to only include sources that agent actually cited
+        const citedEvidenceIds = new Set(normalizedCitations.map(c => c.evidenceId));
+        const filteredEvidence = evidenceWithUpdatedLinks.filter(e => citedEvidenceIds.has(e.id));
+        
+        // If agent provided citations, only include cited evidence
+        // If agent didn't provide citations, include all evidence (fallback behavior)
+        const finalEvidence = agentOutput.citations && agentOutput.citations.length > 0
+          ? filteredEvidence
+          : evidenceWithUpdatedLinks;
+        
+        // Re-normalize citations with filtered evidence to ensure correct numbering
+        const finalCitations = normaliseCitations(agentOutput.citations ?? [], finalEvidence, pagination);
+        
+        logger.info({
+          totalEvidenceBeforeFilter: evidenceWithUpdatedLinks.length,
+          citedEvidenceIds: Array.from(citedEvidenceIds),
+          filteredEvidenceCount: filteredEvidence.length,
+          finalEvidenceCount: finalEvidence.length,
+          citationsCount: finalCitations.length,
+          hasAgentCitations: !!(agentOutput.citations && agentOutput.citations.length > 0)
+        }, 'runAssistant: filtered evidence to match agent citations');
+        
         response = {
           answer: agentOutput.answer ?? 'Jeg klarte ikke å generere et svar.',
-          evidence: evidenceWithUpdatedLinks, // This should include both lovdata-api and serper results
-          citations: normaliseCitations(agentOutput.citations ?? [], evidenceWithUpdatedLinks, pagination),
+          evidence: finalEvidence, // Only include evidence that agent actually cited
+          citations: finalCitations,
           pagination,
           metadata: {
             fallbackProvider: result.fallback?.provider ?? null,
@@ -599,8 +628,10 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
           evidenceCount: response.evidence.length,
           serperEvidenceInResponse: response.evidence.filter(e => e.source === 'serper:lovdata.no').length,
           lovdataEvidenceInResponse: response.evidence.filter(e => e.source === 'lovdata').length,
-          citationsCount: response.citations.length
-        }, 'runAssistant: response built with agent output');
+          citationsCount: response.citations.length,
+          evidenceIds: response.evidence.map(e => e.id),
+          citationIds: response.citations.map(c => c.evidenceId)
+        }, 'runAssistant: response built with agent output - evidence matches citations');
       } else {
         logger.info('runAssistant: building fallback response');
         const fallbackAnswer = buildFallbackAnswer(question, evidenceWithUpdatedLinks, null);
