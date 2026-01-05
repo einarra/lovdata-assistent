@@ -621,40 +621,39 @@ export class SupabaseArchiveStore {
               // Get the total count separately
               // For chunk-based search, count distinct documents from matching chunks
               // For document-based search, count documents directly
-              let countPromise: Promise<{ count: number | null }>;
-              
-              if (rpcFunctionName === 'search_document_chunks_hybrid') {
-                // Count distinct documents from chunks matching the search criteria
-                // Build query matching the same filters as the RPC function
-                let chunkCountQuery = this.supabase
-                  .from('document_chunks')
-                  .select('document_id');
-                
-                // Apply FTS query if available
-                if (tsQuery && tsQuery.trim() !== '') {
-                  chunkCountQuery = chunkCountQuery.textSearch('tsv_content', tsQuery, {
-                    type: 'plain',
-                    config: 'norwegian'
-                  });
-                }
-                
-                // Apply the same filters as the RPC function
-                if (options.filters?.lawType) {
-                  chunkCountQuery = chunkCountQuery.eq('law_type', options.filters.lawType);
-                }
-                if (options.filters?.year) {
-                  chunkCountQuery = chunkCountQuery.eq('year', options.filters.year);
-                }
-                if (options.filters?.ministry) {
-                  chunkCountQuery = chunkCountQuery.eq('ministry', options.filters.ministry);
-                }
-                
-                // Note: This count is based on FTS matches only. The actual hybrid search combines
-                // both FTS and vector search results via RRF. For perfect accuracy, we would need
-                // to count chunks matching EITHER FTS OR vector search, but that requires running
-                // a similarity search which is expensive. This approximation is still much more
-                // accurate than counting documents, and provides a reasonable estimate for pagination.
-                countPromise = chunkCountQuery.then((result) => {
+              const countPromise: Promise<{ count: number | null }> = (async () => {
+                if (rpcFunctionName === 'search_document_chunks_hybrid') {
+                  // Count distinct documents from chunks matching the search criteria
+                  // Build query matching the same filters as the RPC function
+                  let chunkCountQuery = this.supabase
+                    .from('document_chunks')
+                    .select('document_id');
+                  
+                  // Apply FTS query if available
+                  if (tsQuery && tsQuery.trim() !== '') {
+                    chunkCountQuery = chunkCountQuery.textSearch('tsv_content', tsQuery, {
+                      type: 'plain',
+                      config: 'norwegian'
+                    });
+                  }
+                  
+                  // Apply the same filters as the RPC function
+                  if (options.filters?.lawType) {
+                    chunkCountQuery = chunkCountQuery.eq('law_type', options.filters.lawType);
+                  }
+                  if (options.filters?.year) {
+                    chunkCountQuery = chunkCountQuery.eq('year', options.filters.year);
+                  }
+                  if (options.filters?.ministry) {
+                    chunkCountQuery = chunkCountQuery.eq('ministry', options.filters.ministry);
+                  }
+                  
+                  // Note: This count is based on FTS matches only. The actual hybrid search combines
+                  // both FTS and vector search results via RRF. For perfect accuracy, we would need
+                  // to count chunks matching EITHER FTS OR vector search, but that requires running
+                  // a similarity search which is expensive. This approximation is still much more
+                  // accurate than counting documents, and provides a reasonable estimate for pagination.
+                  const result = await chunkCountQuery;
                   if (result.error) {
                     this.logs.warn({ err: result.error }, 'Chunk count query failed, using 0');
                     return { count: 0 };
@@ -662,32 +661,31 @@ export class SupabaseArchiveStore {
                   // Count distinct document_ids
                   const documentIds = new Set((result.data || []).map((row: any) => row.document_id));
                   return { count: documentIds.size };
-                });
-              } else {
-                // Document-based search: count documents directly
-                let countQueryBuilder = this.supabase
-                  .from('lovdata_documents')
-                  .select('id', { count: 'exact', head: true })
-                  .textSearch('tsv_content', tsQuery, {
-                    type: 'plain',
-                    config: 'norwegian'
-                  });
-                
-                // Apply the same filters as the RPC function
-                if (options.filters?.lawType) {
-                  countQueryBuilder = countQueryBuilder.eq('law_type', options.filters.lawType);
+                } else {
+                  // Document-based search: count documents directly
+                  let countQueryBuilder = this.supabase
+                    .from('lovdata_documents')
+                    .select('id', { count: 'exact', head: true })
+                    .textSearch('tsv_content', tsQuery, {
+                      type: 'plain',
+                      config: 'norwegian'
+                    });
+                  
+                  // Apply the same filters as the RPC function
+                  if (options.filters?.lawType) {
+                    countQueryBuilder = countQueryBuilder.eq('law_type', options.filters.lawType);
+                  }
+                  if (options.filters?.year) {
+                    countQueryBuilder = countQueryBuilder.eq('year', options.filters.year);
+                  }
+                  if (options.filters?.ministry) {
+                    countQueryBuilder = countQueryBuilder.eq('ministry', options.filters.ministry);
+                  }
+                  
+                  const result = await countQueryBuilder;
+                  return { count: result.count ?? 0 };
                 }
-                if (options.filters?.year) {
-                  countQueryBuilder = countQueryBuilder.eq('year', options.filters.year);
-                }
-                if (options.filters?.ministry) {
-                  countQueryBuilder = countQueryBuilder.eq('ministry', options.filters.ministry);
-                }
-                
-                countPromise = countQueryBuilder.then((result) => ({
-                  count: result.count ?? 0
-                }));
-              }
+              })();
 
               // Execute both queries in parallel
               const [rpcResult, countResult] = await Promise.all([
