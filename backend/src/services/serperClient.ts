@@ -8,8 +8,8 @@ export const AGENT_RESTRICTED_PATTERNS = [
   '/avgjørelse/',   // Rettsavgjørelser - alternativ form
   '/lover/',        // Law pattern
   '/lov/',        // Law pattern - alternative form
-  '/forskrifter/'   // Regulation pattern
-  '/forskrift/'   // Regulation pattern - alternative form
+  '/forskrifter/',   // Regulation pattern
+  '/forskrift/',   // Regulation pattern - alternative form
   '/lovtidend/',    // Lovtidend dokumenter (not /register/lovtidend)
   '/husleietvistutvalget/',
   '/trygderetten/',
