@@ -3,7 +3,7 @@ import { env } from '../config/env.js';
 // Restricted URL patterns for agent use (only these patterns will be searched)
 // Note: These patterns should match actual document URLs, not search/register pages
 export const AGENT_RESTRICTED_PATTERNS = [
-  '/avgjørelser/',  // Rettsavgjørelser
+  '/avgjørelse/',  // Rettsavgjørelser
   '/lovtidend/',    // Lovtidend dokumenter (not /register/lovtidend)
   '/husleietvistutvalget/',
   '/trygderetten/',
@@ -62,12 +62,12 @@ export class SerperClient {
       } else if (options.targetDocuments) {
         // Target common Lovdata document URL patterns (default for non-agent calls):
         // - /dokument/ (document pages)
-        // - /lover/ (laws)
-        // - /forskrifter/ (regulations)
+        // - /lov/ (laws)
+        // - /forskrift/ (regulations)
         // - /rundskriv/ (circulars)
         // - /vedtak/ (decisions)
-        // - /avgjørelser/ (decisions)
-        // - /lokaleForskrifte/ (local regulations)
+        // - /avgjørelse/ (decisions)
+        // - /lokaleForskrifter/ (local regulations)
         // - /lovtidend/ (law gazette)
         // - /eosavtalen/ (EEA agreement)
         // - /traktater/ (treaties)
@@ -233,14 +233,14 @@ export class SerperClient {
     // Include document patterns
     const documentPatterns = [
       /\/dokument\//,
-      /\/lover\//,
-      /\/forskrifter\//,
+      /\/lov\//,
+      /\/forskrift\//,
       /\/rundskriv\//,
       /\/vedtak\//,
       /\/lovsamling\//,
       /\/historikk\//,
-      /\/avgjørelser\//,
-      /\/lokaleForskrifte\//,
+      /\/avgjørelse\//,
+      /\/lokaleForskrifter\//,
       /\/lovtidend\//,  // But not /register/lovtidend (excluded above)
       /\/eosavtalen\//,
       /\/traktater\//,
