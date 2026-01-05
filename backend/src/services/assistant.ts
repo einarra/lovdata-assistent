@@ -173,9 +173,40 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
                     );
                     
                     // Convert skill results to evidence
-                    const skillOutputData = skillResult.result ?? ({} as any);
-                    const lovdataResult = (skillOutputData.result ?? {}) as LovdataSkillSearchResult;
+                    // The skill returns: { result: { query, hits, searchedFiles, ... } }
+                    // So skillResult.result already contains the hits array
+                    logger.info({
+                      skillResultType: typeof skillResult.result,
+                      skillResultHasResult: !!skillResult.result,
+                      skillResultKeys: skillResult.result ? Object.keys(skillResult.result) : [],
+                      skillResultString: JSON.stringify(skillResult.result).substring(0, 500)
+                    }, 'runAssistant: skill result structure');
+                    
+                    const lovdataResult = (skillResult.result ?? {}) as LovdataSkillSearchResult;
+                    
+                    logger.info({
+                      lovdataResultKeys: Object.keys(lovdataResult),
+                      hitsCount: lovdataResult.hits?.length ?? 0,
+                      hitsIsArray: Array.isArray(lovdataResult.hits),
+                      hitsSample: lovdataResult.hits?.[0] ? {
+                        filename: lovdataResult.hits[0].filename,
+                        member: lovdataResult.hits[0].member,
+                        hasSnippet: !!lovdataResult.hits[0].snippet,
+                        snippetLength: lovdataResult.hits[0].snippet?.length ?? 0
+                      } : null
+                    }, 'runAssistant: lovdata result structure');
+                    
                     const newEvidence = convertLovdataSkillResultsToEvidence(lovdataResult.hits ?? []);
+                    
+                    logger.info({
+                      newEvidenceCount: newEvidence.length,
+                      evidenceSample: newEvidence[0] ? {
+                        id: newEvidence[0].id,
+                        source: newEvidence[0].source,
+                        hasTitle: !!newEvidence[0].title,
+                        hasSnippet: !!newEvidence[0].snippet
+                      } : null
+                    }, 'runAssistant: evidence conversion result');
                     
                     // Deduplicate evidence by (filename, member) to avoid duplicates
                     const existingKeys = new Set(agentEvidence.map(e => `${e.metadata?.filename}:${e.metadata?.member}`));
