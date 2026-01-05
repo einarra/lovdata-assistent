@@ -76,6 +76,20 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
         throw new Error('Archive store is not available for Lovdata search');
       }
 
+      // Generate query embedding once to reuse across all searches (OPTIMIZATION)
+      // This enables hybrid search (vector + keyword) for better search quality
+      let queryEmbedding: number[] | null = null;
+      try {
+        // Access embedding service from archive store if available
+        const embeddingService = (archiveStore as any).embeddingService as EmbeddingService | null;
+        if (embeddingService) {
+          queryEmbedding = await embeddingService.generateEmbedding(command.query);
+          logger.debug({ queryLength: command.query.length }, 'Generated query embedding for search');
+        }
+      } catch (embeddingError) {
+        logger.warn({ err: embeddingError }, 'Failed to generate query embedding - will fall back to FTS-only search');
+      }
+
       // Determine if we should use prioritized search (when lawType is not specified)
       const usePrioritizedSearch = !command.filters?.lawType;
       const defaultLawTypePriority = ['Lov', 'Forskrift', 'Vedtak', 'Instruks', 'Reglement', 'Vedlegg'] as const;
@@ -83,18 +97,6 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
       let searchResult: LovdataSearchResult | null = null;
       
       if (usePrioritizedSearch) {
-        // Generate query embedding once to reuse across all searches (OPTIMIZATION)
-        let queryEmbedding: number[] | null = null;
-        try {
-          // Access embedding service from archive store if available
-          const embeddingService = (archiveStore as any).embeddingService as EmbeddingService | null;
-          if (embeddingService) {
-            queryEmbedding = await embeddingService.generateEmbedding(command.query);
-            logger.debug({ queryLength: command.query.length }, 'Generated query embedding for prioritized search');
-          }
-        } catch (embeddingError) {
-          logger.warn({ err: embeddingError }, 'Failed to generate query embedding for prioritized search - will generate per search');
-        }
         
         // Try each law type in priority order until we get sufficient results
         const minResults = Math.max(3, Math.floor(pageSize * 0.5)); // Require at least 50% of requested results
@@ -219,13 +221,14 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
           }
         }
       } else {
-        // Law type specified, use normal search
+        // Law type specified, use normal search with embedding for hybrid search
         searchResult = await searchLovdataPublicData({
           store: archiveStore,
           query: command.query,
           page,
           pageSize,
-          filters: command.filters
+          filters: command.filters,
+          queryEmbedding // Use pre-computed embedding for hybrid search
         });
       }
       
