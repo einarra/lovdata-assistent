@@ -10,6 +10,7 @@ import { logger } from '../logger.js';
 import { withTrace } from '../observability/tracing.js';
 import { lovdataSearchFunction } from '../skills/lovdata-api/functionSchema.js';
 import { lovdataSerperFunction } from '../skills/lovdata-serper/functionSchema.js';
+import { SerperClient } from './serperClient.js';
 
 type AssistantPipelineResult = {
   response: AssistantRunResponse;
@@ -953,20 +954,50 @@ function convertLovdataSkillResultsToEvidence(hits: Array<{
 }
 
 // Helper function to convert serper skill results to evidence
+// Only includes results with direct document links (filters out search pages and other non-document links)
 function convertSerperResultsToEvidence(organic: Array<{
   title?: string | null;
   link?: string | null;
   snippet?: string | null;
   date?: string | null;
+  isDocument?: boolean;
 }>): AgentEvidence[] {
-  return organic.map((item, index) => ({
-    id: `serper-${index + 1}`,
-    source: 'serper:lovdata.no',
-    title: item.title ?? 'Uten tittel',
-    snippet: item.snippet ?? null,
-    date: item.date ?? null,
-    link: item.link ?? null
-  }));
+  let evidenceIndex = 0;
+  
+  return organic
+    .filter((item) => {
+      // Only include items with valid document links
+      // Filter out search pages, list pages, and other non-document links
+      if (!item.link) {
+        logger.debug({
+          title: item.title,
+          reason: 'no_link'
+        }, 'convertSerperResultsToEvidence: filtering out item with no link');
+        return false;
+      }
+      
+      // Check if it's a direct document link
+      const isDocument = item.isDocument ?? SerperClient.isDocumentLink(item.link);
+      
+      if (!isDocument) {
+        logger.debug({
+          link: item.link,
+          title: item.title,
+          isDocument: item.isDocument
+        }, 'convertSerperResultsToEvidence: filtering out non-document link');
+        return false;
+      }
+      
+      return true;
+    })
+    .map((item) => ({
+      id: `serper-${++evidenceIndex}`,
+      source: 'serper:lovdata.no',
+      title: item.title ?? 'Uten tittel',
+      snippet: item.snippet ?? null,
+      date: item.date ?? null,
+      link: item.link! // Safe to use ! here because we filtered out null links
+    }));
 }
 
 function buildXmlViewerUrl(
