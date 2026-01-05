@@ -5,9 +5,12 @@
 
 export const lovdataSerperFunction = {
   name: 'search_lovdata_legal_practice',
-  description: `Søk gjennom Lovdata.no for å finne utdypende informasjon om lover og forskrifter fra rettsavgjørelser, rettspraksis og praktisk anvendelse i rettssystemet. 
+  description: `Søk direkte på lovdata.no for å finne lover, sentrale forskrifter og rettspraksis. 
 
-Bruk denne funksjonen når du trenger:
+VIKTIG: Denne funksjonen gir deg direkte lenker til dokumenter på lovdata.no som automatisk inkluderes i evidence-listen. Alle lenker peker direkte til dokumentene, ikke søkesider.
+
+Bruk denne funksjonen for å finne:
+- Lover og sentrale forskrifter publisert på lovdata.no
 - Rettsavgjørelser og dommer som illustrerer hvordan lover og forskrifter anvendes
 - Praktiske eksempler på tolking og anvendelse av lovtekster
 - Kontekst om hvordan rettsregler brukes i praksis
@@ -20,13 +23,13 @@ Denne funksjonen søker kun på lovdata.no og begrenser søket til spesifikke do
 - Trygderetten (/trygderetten/)
 - State Personnel Handbook 2025 (/sph2025/)
 
-Bruk denne i kombinasjon med search_lovdata_legal_documents for å gi både lovtekster og praktiske eksempler.`,
+Bruk denne i kombinasjon med search_lovdata_legal_documents for å gi både lovtekster fra offentlige data og dokumenter fra lovdata.no. Dette gir deg både lovtekster og praktiske eksempler med direkte lenker til dokumentene.`,
   parameters: {
     type: 'object',
     properties: {
       query: {
         type: 'string',
-        description: 'Søkeordene basert på brukerens spørsmål. Fokuser på juridiske termer, lovnavn eller emner du vil finne praksis for.'
+        description: 'Søkeordene basert på brukerens spørsmål. Bruk lovnavn (f.eks. "arveloven", "arbeidsmiljøloven"), juridiske termer, eller emner du vil finne lover, forskrifter eller rettspraksis for. Ekstraher relevante søkeord fra brukerens spørsmål.'
       },
       num: {
         type: 'number',
