@@ -70,6 +70,41 @@ export class SupabaseArchiveStore {
   }
 
   /**
+   * Enhance query text for embedding generation to improve relevance.
+   * Adds context about what we're looking for to reduce false positives.
+   * @param query - Original search query
+   * @param filters - Optional filters (lawType, year, ministry)
+   * @returns Enhanced query text
+   */
+  private enhanceQueryForEmbedding(
+    query: string, 
+    filters?: { lawType?: string | null; year?: number | null; ministry?: string | null }
+  ): string {
+    const parts: string[] = [];
+    
+    // Add context about what we're searching for
+    parts.push('Søk etter juridiske dokumenter om:');
+    parts.push(query);
+    
+    // Add filter context if available to narrow down search
+    if (filters?.lawType) {
+      parts.push(`Dokumenttype: ${filters.lawType}`);
+    }
+    if (filters?.year) {
+      parts.push(`År: ${filters.year}`);
+    }
+    if (filters?.ministry) {
+      parts.push(`Departement: ${filters.ministry}`);
+    }
+    
+    // Add instruction to exclude irrelevant laws
+    // This helps the embedding model understand we want specific, relevant results
+    parts.push('Finn relevante dokumenter som direkte svarer på spørsmålet.');
+    
+    return parts.join('\n');
+  }
+
+  /**
    * Validates and sanitizes member path to prevent path traversal attacks.
    * @param member - Document member path to validate
    * @throws Error if member is invalid
@@ -350,9 +385,30 @@ export class SupabaseArchiveStore {
         }
 
         // Generate embeddings for chunks if embedding service is available
+        // Include document title and section title in embedding for better context
+        // This helps distinguish between similar content in different laws
         if (this.embeddingService && allChunks.length > 0) {
           try {
-            const chunkTexts = allChunks.map(c => c.content);
+            // Build enriched text for embedding: title + section + content
+            // This provides better context and helps distinguish between similar content in different laws
+            const chunkTexts = allChunks.map(c => {
+              const parts: string[] = [];
+              // Add document title for context
+              if (c.document_title) {
+                parts.push(`Dokument: ${c.document_title}`);
+              }
+              // Add section title if available
+              if (c.section_title) {
+                parts.push(`Seksjon: ${c.section_title}`);
+              }
+              // Add section number if available
+              if (c.section_number) {
+                parts.push(`§${c.section_number}`);
+              }
+              // Add content
+              parts.push(c.content);
+              return parts.join('\n\n');
+            });
             const chunkEmbeddings = await this.embeddingService.generateEmbeddings(chunkTexts);
 
             for (let j = 0; j < allChunks.length && j < chunkEmbeddings.length; j++) {
@@ -490,13 +546,23 @@ export class SupabaseArchiveStore {
     const tsQuery = tokens.map(token => `${token}:*`).join(' & ');
 
     // Use provided query embedding or generate one if hybrid search is available
+    // Enhance query with context to improve relevance and reduce false positives
     let queryEmbedding: number[] | null = options.queryEmbedding ?? null;
     if (!queryEmbedding && this.embeddingService) {
       try {
-        const embeddingTimer = new Timer('generate_query_embedding', this.logs, { query: query.substring(0, 100) });
-        queryEmbedding = await this.embeddingService.generateEmbedding(query);
+        // Enhance query with context to improve embedding quality
+        // This helps the vector search better understand intent and reduce false positives
+        const enhancedQuery = this.enhanceQueryForEmbedding(query, options.filters);
+        const embeddingTimer = new Timer('generate_query_embedding', this.logs, { 
+          originalQuery: query.substring(0, 100),
+          enhancedQuery: enhancedQuery.substring(0, 150)
+        });
+        queryEmbedding = await this.embeddingService.generateEmbedding(enhancedQuery);
         embeddingTimer.end({ embeddingLength: queryEmbedding.length });
-        this.logs.debug({ queryLength: query.length }, 'Generated query embedding for hybrid search');
+        this.logs.debug({ 
+          queryLength: query.length, 
+          enhancedQueryLength: enhancedQuery.length 
+        }, 'Generated query embedding for hybrid search');
       } catch (embeddingError) {
         // Log error but continue with FTS-only search
         this.logs.warn({ err: embeddingError }, 'Failed to generate query embedding - falling back to FTS-only search');
@@ -707,16 +773,32 @@ export class SupabaseArchiveStore {
               }
 
               // Log RPC result details for debugging
+              // Track which documents are returned to identify patterns in irrelevant results
+              const resultTitles = (rpcResult.data ?? []).slice(0, 10).map((r: any) => ({
+                title: r.document_title || r.title || 'Unknown',
+                filename: r.archive_filename,
+                lawType: r.law_type,
+                rrfScore: r.rrf_score,
+                ftsRank: r.fts_rank,
+                vectorDistance: r.vector_distance
+              }));
+              
               this.logs.info({
                 rpcFunction: rpcFunctionName,
                 resultCount: rpcResult.data?.length ?? 0,
                 hasData: !!rpcResult.data,
                 searchQuery: query,
+                resultTitles,
                 sampleResult: rpcResult.data?.[0] ? {
                   archive_filename: rpcResult.data[0].archive_filename,
                   member: rpcResult.data[0].member,
+                  document_title: rpcResult.data[0].document_title || rpcResult.data[0].title,
+                  law_type: rpcResult.data[0].law_type,
                   hasContent: !!rpcResult.data[0].content,
-                  contentLength: rpcResult.data[0].content?.length ?? 0
+                  contentLength: rpcResult.data[0].content?.length ?? 0,
+                  rrf_score: rpcResult.data[0].rrf_score,
+                  fts_rank: rpcResult.data[0].fts_rank,
+                  vector_distance: rpcResult.data[0].vector_distance
                 } : null
               }, 'searchAsync: RPC function returned results');
 

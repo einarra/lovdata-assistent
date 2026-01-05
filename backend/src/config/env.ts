@@ -135,7 +135,7 @@ const envSchema = z.object({
   COHERE_API_KEY: z.string().optional().transform(val => val && val.trim() ? val.trim() : undefined),
   COHERE_BASE_URL: z.string().url().optional().default('https://api.cohere.ai/v1'),
   ENABLE_RERANKING: z.string().transform(val => val === 'true' || val === '1').default('true'),
-  RRF_K: z.coerce.number().int().positive().default(60), // RRF constant for hybrid search (typical range: 20-60)
+  RRF_K: z.coerce.number().int().positive().default(40), // RRF constant for hybrid search (lower = more differentiation between ranks, typical range: 20-60)
   LANGSMITH_API_KEY: z.string().optional(),
   LANGSMITH_PROJECT: z.string().optional(),
   LANGSMITH_ENDPOINT: z.string().optional(),
