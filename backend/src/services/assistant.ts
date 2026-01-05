@@ -156,19 +156,43 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
                   if (functionCall.name === 'search_lovdata_legal_documents') {
                     // Execute lovdata-api skill
                     const searchParams = JSON.parse(functionCall.arguments);
-                    logger.info({ searchParams }, 'runAssistant: executing lovdata-api search');
+                    
+                    // Apply default year filter: min 2021 (last 5 years) for Lov and Forskrift
+                    // unless user explicitly requested a different year
+                    const currentYear = new Date().getFullYear();
+                    const minYear = currentYear - 5; // 5 years back (2021 for 2026)
+                    let yearFilter = searchParams.year;
+                    
+                    // If searching for Lov or Forskrift and no year specified, use minYear
+                    if ((searchParams.lawType === 'Lov' || searchParams.lawType === 'Forskrift' || !searchParams.lawType) && !searchParams.year) {
+                      yearFilter = minYear;
+                      logger.info({
+                        lawType: searchParams.lawType,
+                        appliedYearFilter: yearFilter,
+                        reason: 'default_5_year_limit'
+                      }, 'runAssistant: applying default 5-year filter for Lov/Forskrift');
+                    }
+                    
+                    logger.info({ 
+                      searchParams,
+                      yearFilter,
+                      appliedYearFilter: yearFilter !== searchParams.year
+                    }, 'runAssistant: executing lovdata-api search');
                     
                     const skillResult = await orchestrator.run(
                       {
                         input: {
                           action: 'searchPublicData',
                           query: searchParams.query,
-                          lawType: searchParams.lawType,
-                          year: searchParams.year,
-                          ministry: searchParams.ministry,
-                          page: searchParams.page || page,
+                          filters: {
+                            lawType: searchParams.lawType,
+                            year: yearFilter,
+                            ministry: searchParams.ministry
+                          },
+                          page: searchParams.page || 1,
                           pageSize: searchParams.pageSize || pageSize
-                        }
+                        },
+                        hints: { preferredSkill: 'lovdata-api' }
                       },
                       ctx
                     );
@@ -672,6 +696,27 @@ async function updateLinksForHtmlContent(evidence: AgentEvidence[], services: Se
           return item;
         }
 
+        // Try to extract data-lovdata-URL from XML content first
+        if (fullText) {
+          const lovdataUrl = extractLovdataUrlFromXml(fullText);
+          if (lovdataUrl) {
+            logger.debug({ 
+              filename, 
+              member, 
+              lovdataUrl,
+              evidenceId: item.id 
+            }, 'updateLinksForHtmlContent: extracted data-lovdata-URL from XML');
+            return {
+              ...item,
+              link: lovdataUrl,
+              metadata: {
+                ...metadata,
+                lovdataUrl: lovdataUrl
+              }
+            };
+          }
+        }
+
         if (fullText && isHtmlContent(fullText) && member.toLowerCase().endsWith('.xml')) {
           // Update link to use .html extension - endpoint will handle the fallback to .xml
           const htmlMember = member.replace(/\.xml$/i, '.html');
@@ -831,11 +876,28 @@ async function hydrateEvidenceContent(evidence: AgentEvidence[], services: Servi
           contentCache.set(cacheKey, truncateContent(fullText));
         }
 
-        // If content is HTML but member name ends in .xml, update link and metadata to reflect .html
-        // The endpoint will handle .html in the member parameter by falling back to .xml for fetching
+        // Try to extract data-lovdata-URL from XML content first
         const updatedMetadata = { ...metadata };
         let updatedLink = item.link;
-        if (fullText && isHtmlContent(fullText) && member.toLowerCase().endsWith('.xml')) {
+        
+        if (fullText) {
+          const lovdataUrl = extractLovdataUrlFromXml(fullText);
+          if (lovdataUrl) {
+            logger.debug({ 
+              filename, 
+              member, 
+              lovdataUrl,
+              evidenceId: item.id 
+            }, 'hydrateEvidenceContent: extracted data-lovdata-URL from XML');
+            updatedLink = lovdataUrl;
+            updatedMetadata.lovdataUrl = lovdataUrl;
+          }
+        }
+
+        // If content is HTML but member name ends in .xml, update link and metadata to reflect .html
+        // The endpoint will handle .html in the member parameter by falling back to .xml for fetching
+        // Only do this if we didn't find a data-lovdata-URL
+        if (fullText && isHtmlContent(fullText) && member.toLowerCase().endsWith('.xml') && !updatedMetadata.lovdataUrl) {
           updatedMetadata.fileExtension = '.html';
           // Update member name in metadata to show .html extension
           const htmlMember = member.replace(/\.xml$/i, '.html');
@@ -1098,6 +1160,52 @@ function convertSerperResultsToEvidence(organic: Array<{
     date: item.date ?? null,
     link: item.link! // Safe to use ! here because we filtered out null links
   }));
+}
+
+/**
+ * Extract data-lovdata-URL from XML content
+ * Looks for legalArticle elements with data-lovdata-URL attribute
+ * Returns the first found URL or null
+ */
+function extractLovdataUrlFromXml(xmlContent: string | null | undefined): string | null {
+  if (!xmlContent) {
+    return null;
+  }
+  
+  try {
+    // Match legalArticle elements with data-lovdata-URL attribute
+    // Pattern variations:
+    // - <article class="legalArticle" data-lovdata-URL="...">
+    // - <article data-lovdata-URL="..." class="legalArticle">
+    // - <article class="legalArticle" data-lovdata-url="..."> (case insensitive)
+    // Try multiple patterns to catch different attribute orders
+    const patterns = [
+      // Pattern 1: class="legalArticle" ... data-lovdata-URL="..."
+      /<article[^>]*class=["'][^"']*legalArticle[^"']*["'][^>]*data-lovdata-URL=["']([^"']+)["']/i,
+      // Pattern 2: data-lovdata-URL="..." ... class="legalArticle"
+      /<article[^>]*data-lovdata-URL=["']([^"']+)["'][^>]*class=["'][^"']*legalArticle[^"']*["']/i,
+      // Pattern 3: Any article with data-lovdata-URL (fallback)
+      /<article[^>]*data-lovdata-URL=["']([^"']+)["']/i
+    ];
+    
+    for (const pattern of patterns) {
+      const match = xmlContent.match(pattern);
+      if (match && match[1]) {
+        const urlPath = match[1].trim();
+        // Build full URL: https://lovdata.no/ + urlPath
+        // Remove leading slash if present (to avoid double slashes)
+        const cleanPath = urlPath.startsWith('/') ? urlPath : `/${urlPath}`;
+        const fullUrl = `https://lovdata.no${cleanPath}`;
+        logger.debug({ urlPath, fullUrl }, 'extractLovdataUrlFromXml: extracted URL');
+        return fullUrl;
+      }
+    }
+    
+    return null;
+  } catch (error) {
+    logger.debug({ err: error }, 'extractLovdataUrlFromXml: error extracting URL');
+    return null;
+  }
 }
 
 function buildXmlViewerUrl(

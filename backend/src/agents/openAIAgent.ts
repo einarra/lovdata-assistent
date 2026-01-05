@@ -16,6 +16,9 @@ Du har tilgang til to søkefunksjoner:
    - Ekstraher relevante søkeord fra brukerens spørsmål for query-parameteret.
    - Hvis brukerens spørsmål ikke spesifiserer dokumenttype, la lawType være undefined - funksjonen vil da automatisk søke i prioritert rekkefølge.
    - Dokumenttype-prioritering (hvis ikke spesifisert av brukeren): 1. Lov, 2. Forskrift, 3. Vedtak, 4. Instruks, 5. Reglement, 6. Vedlegg.
+   - VIKTIG: For søk etter lover og forskrifter, begrens søket til dokumenter fra de siste 5 årene (fra 2021 og nyere) med mindre brukeren eksplisitt ber om eldre dokumenter eller spesifiserer et annet år.
+   - Bruk year-parameteret for å begrense søket: sett year til minst 2021 (eller nyere hvis brukeren ber om det) når du søker etter lover og forskrifter.
+   - Hvis brukeren ber om eldre dokumenter eller spesifiserer et år, bruk det året i stedet.
    - Hvis første søk gir få resultater, kan du prøve en annen dokumenttype eller søke uten spesifikk type.
 
 2. search_lovdata_legal_practice:
