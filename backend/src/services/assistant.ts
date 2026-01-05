@@ -264,16 +264,45 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
                     );
                     
                     // Convert serper results to evidence
-                    const skillOutputData = skillResult.result ?? ({} as any);
-                    const serperResult = (skillOutputData.result ?? {}) as { 
+                    // The skill returns: { result: { query, site, organic } }
+                    // So skillResult.result already contains the organic array
+                    const serperResult = (skillResult.result ?? {}) as { 
+                      query?: string;
+                      site?: string;
                       organic?: Array<{ 
                         title?: string | null; 
                         link?: string | null; 
                         snippet?: string | null; 
-                        date?: string | null 
+                        date?: string | null;
+                        isDocument?: boolean;
                       }> 
                     };
-                    const newEvidence = convertSerperResultsToEvidence(serperResult?.organic ?? []);
+                    
+                    logger.info({
+                      skillResultType: typeof skillResult.result,
+                      skillResultKeys: skillResult.result ? Object.keys(skillResult.result) : [],
+                      serperResultKeys: Object.keys(serperResult),
+                      organicCount: serperResult.organic?.length ?? 0,
+                      organicIsArray: Array.isArray(serperResult.organic),
+                      organicSample: serperResult.organic?.[0] ? {
+                        title: serperResult.organic[0].title,
+                        hasLink: !!serperResult.organic[0].link,
+                        hasSnippet: !!serperResult.organic[0].snippet,
+                        isDocument: serperResult.organic[0].isDocument
+                      } : null
+                    }, 'runAssistant: serper result structure');
+                    
+                    const newEvidence = convertSerperResultsToEvidence(serperResult.organic ?? []);
+                    
+                    logger.info({
+                      newEvidenceCount: newEvidence.length,
+                      evidenceSample: newEvidence[0] ? {
+                        id: newEvidence[0].id,
+                        source: newEvidence[0].source,
+                        hasTitle: !!newEvidence[0].title,
+                        hasLink: !!newEvidence[0].link
+                      } : null
+                    }, 'runAssistant: serper evidence conversion result');
                     
                     // Deduplicate evidence by link to avoid duplicates
                     const existingLinks = new Set(agentEvidence.map(e => e.link).filter(Boolean));
