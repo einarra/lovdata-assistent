@@ -1261,11 +1261,18 @@ function extractLovdataUrlFromXml(xmlContent: string | null | undefined): string
       const match = xmlContent.match(pattern);
       if (match && match[1]) {
         const urlPath = match[1].trim();
+        // Remove query parameters (e.g., ?q=el) from the URL path
+        // The data-lovdata-URL should point to the document itself, not a search result
+        const urlPathWithoutQuery = urlPath.split('?')[0];
         // Build full URL: https://lovdata.no/ + urlPath
         // Remove leading slash if present (to avoid double slashes)
-        const cleanPath = urlPath.startsWith('/') ? urlPath : `/${urlPath}`;
+        const cleanPath = urlPathWithoutQuery.startsWith('/') ? urlPathWithoutQuery : `/${urlPathWithoutQuery}`;
         const fullUrl = `https://lovdata.no${cleanPath}`;
-        logger.debug({ urlPath, fullUrl }, 'extractLovdataUrlFromXml: extracted URL');
+        logger.debug({ 
+          originalUrlPath: urlPath, 
+          cleanedUrlPath: urlPathWithoutQuery,
+          fullUrl 
+        }, 'extractLovdataUrlFromXml: extracted URL (removed query params)');
         return fullUrl;
       }
     }
