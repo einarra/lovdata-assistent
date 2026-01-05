@@ -5,7 +5,7 @@ import { env } from '../config/env.js';
 // Patterns are ordered by priority - rettsavgjørelser is prioritized first
 export const AGENT_RESTRICTED_PATTERNS = [
   '/avgjørelser/',  // Rettsavgjørelser - (flertall form)
-  '/avgjørelse/',   // Rettsavgjørelser - alternativ form
+  '/avgjorelse/',   // Rettsavgjørelser - alternativ form
   '/lover/',        // Law pattern
   '/lov/',        // Law pattern - alternative form
   '/forskrifter/',   // Regulation pattern
@@ -78,7 +78,7 @@ export class SerperClient {
         // - /forskrift/ (regulations)
         // - /rundskriv/ (circulars)
         // - /vedtak/ (decisions)
-        // - /avgjørelse/ (decisions)
+        // - /avgjorelse/ (decisions)
         // - /lokaleForskrifter/ (local regulations)
         // - /lovtidend/ (law gazette)
         // - /eosavtalen/ (EEA agreement)
@@ -87,7 +87,7 @@ export class SerperClient {
         // - /tariffavtaler/ (collective agreements)
         // - /husleietvistutvalget/ (rent dispute committee)
         // - /sph2025/ (State Personnel Handbook 2025)
-        siteQuery = `site:${normalizedSite} (inurl:/dokument/ OR inurl:/lover/ OR inurl:/lov/ OR inurl:/forskrifter/ OR inurl:/forskrift/ OR inurl:/avgjørelser/ OR inurl:/avgjørelse/ OR inurl:/rundskriv/ OR inurl:/vedtak/ OR inurl:/lokaleForskrifte/ OR inurl:/lovtidend/ OR inurl:/eosavtalen/ OR inurl:/traktater/ OR inurl:/trygderetten/ OR inurl:/tariffavtaler/ OR inurl:/husleietvistutvalget/ OR inurl:/sph2025/) `;
+        siteQuery = `site:${normalizedSite} (inurl:/dokument/ OR inurl:/lover/ OR inurl:/lov/ OR inurl:/forskrifter/ OR inurl:/forskrift/ OR inurl:/avgjørelser/ OR inurl:/avgjorelse/ OR inurl:/rundskriv/ OR inurl:/vedtak/ OR inurl:/lokaleForskrifter/ OR inurl:/lovtidend/ OR inurl:/eosavtalen/ OR inurl:/traktater/ OR inurl:/trygderetten/ OR inurl:/tariffavtaler/ OR inurl:/husleietvistutvalget/ OR inurl:/sph2025/) `;
       } else {
         siteQuery = `site:${normalizedSite} `;
       }
@@ -246,7 +246,7 @@ export class SerperClient {
       /\/dokument\//,
       /\/lov\//,
       /\/forskrift\//,
-      /\/avgjørelse\//,
+      /\/avgjorelse\//,
       /\/rundskriv\//,
       /\/vedtak\//,
       /\/lovsamling\//,
