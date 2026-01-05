@@ -15,7 +15,13 @@ Prioritering av dokumenttyper (søk i denne rekkefølgen hvis brukerens spørsm�
 5. Reglement (regulations/regulations)
 6. Vedlegg (annexes) - lavest prioritet
 
-VIKTIG: Søk alltid gjennom dokumenttype Lov og Forskrift først. Hvis du ikke finner tilstrekkelige resultater med en dokumenttype, prøv neste type i prioritetsrekkefølgen.`,
+VIKTIG: Søk alltid gjennom dokumenttype Lov og Forskrift først. Hvis du ikke finner tilstrekkelige resultater med en dokumenttype, prøv neste type i prioritetsrekkefølgen.
+
+VIKTIG: Når du får søkeresultater, evaluer dem først:
+- Sjekk om resultatene faktisk svarer på brukerens spørsmål basert på titler og utdrag
+- Hvis resultatene er irrelevante eller ikke gir nok informasjon, forbedre søkeordene og søk på nytt
+- Bruk mer spesifikke søkeord, prøv andre dokumenttyper, eller juster år-filteret hvis nødvendig
+- Du kan søke flere ganger for å finne bedre resultater før du går videre`,
   parameters: {
     type: 'object',
     properties: {

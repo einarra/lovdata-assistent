@@ -246,19 +246,34 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
                     
                     agentEvidence = [...agentEvidence, ...uniqueNewEvidence];
                     
-                    // Format function result with better guidance for agent
+                    // Add evidence to list (agent needs to see results to evaluate)
+                    // But mark them as pending evaluation
+                    agentEvidence = [...agentEvidence, ...uniqueNewEvidence];
+                    
+                    // Format function result with evaluation guidance for agent
+                    // Include sample results so agent can evaluate relevance
+                    const sampleHits = (lovdataResult.hits ?? []).slice(0, 5).map((hit, idx) => ({
+                      index: idx + 1,
+                      title: hit.title,
+                      snippet: hit.snippet?.substring(0, 300) ?? '',
+                      filename: hit.filename,
+                      member: hit.member
+                    }));
+                    
                     const formattedResult = {
                       ...lovdataResult,
                       _guidance: {
                         hitsFound: lovdataResult.hits?.length ?? 0,
                         totalHits: lovdataResult.totalHits ?? 0,
+                        sampleResults: sampleHits,
+                        evaluationRequired: true,
                         message: lovdataResult.hits && lovdataResult.hits.length > 0
-                          ? `Found ${lovdataResult.hits.length} result(s). Use these to answer the user's question.`
-                          : `No results found for this search. Consider trying a different law type, year, or broader search terms.`
+                          ? `VIKTIG: Evaluér relevansen av disse ${lovdataResult.hits.length} resultatene (${lovdataResult.totalHits} totalt). Sjekk om resultatene faktisk svarer på brukerens spørsmål basert på titler og utdrag. Hvis resultatene er irrelevante eller ikke gir nok informasjon, forbedre søkeordene og søk på nytt med mer spesifikke termer, annen dokumenttype (lawType), eller justert år-filter. Du kan søke flere ganger for å finne bedre resultater.`
+                          : `Ingen resultater funnet for dette søket. Vurder å prøve annen dokumenttype (lawType), år, eller bredere søkeord.`
                       }
                     };
                     
-                    // Add to function results for next iteration
+                    // Add to function results for next iteration - agent will evaluate
                     functionResults.push({
                       name: functionCall.name,
                       result: formattedResult,
@@ -267,8 +282,10 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
                     
                     logger.info({
                       hitsCount: lovdataResult.hits?.length ?? 0,
-                      newEvidenceCount: newEvidence.length
-                    }, 'runAssistant: lovdata-api search completed');
+                      newEvidenceCount: newEvidence.length,
+                      evidenceAddedToAgent: uniqueNewEvidence.length,
+                      message: 'Evidence added to list - agent should evaluate and potentially refine search'
+                    }, 'runAssistant: lovdata-api search completed - agent should evaluate results');
                     
                   } else if (functionCall.name === 'search_lovdata_legal_practice') {
                     // Execute lovdata-serper skill
