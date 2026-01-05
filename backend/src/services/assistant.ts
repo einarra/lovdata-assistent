@@ -308,14 +308,36 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
                     // Deduplicate evidence by link to avoid duplicates
                     const existingLinks = new Set(agentEvidence.map(e => e.link).filter(Boolean));
                     const uniqueNewEvidence = newEvidence.filter(e => {
-                      if (!e.link || existingLinks.has(e.link)) {
+                      if (!e.link) {
+                        logger.debug({ evidenceId: e.id, title: e.title }, 'runAssistant: serper evidence filtered out - no link');
+                        return false;
+                      }
+                      if (existingLinks.has(e.link)) {
+                        logger.debug({ evidenceId: e.id, link: e.link, title: e.title }, 'runAssistant: serper evidence filtered out - duplicate link');
                         return false;
                       }
                       existingLinks.add(e.link);
                       return true;
                     });
                     
+                    logger.info({
+                      totalSerperEvidence: newEvidence.length,
+                      uniqueSerperEvidence: uniqueNewEvidence.length,
+                      filteredOut: newEvidence.length - uniqueNewEvidence.length,
+                      uniqueEvidenceSample: uniqueNewEvidence.slice(0, 3).map(e => ({
+                        id: e.id,
+                        title: e.title,
+                        link: e.link
+                      }))
+                    }, 'runAssistant: serper evidence deduplication');
+                    
                     agentEvidence = [...agentEvidence, ...uniqueNewEvidence];
+                    
+                    logger.info({
+                      totalEvidenceAfterSerper: agentEvidence.length,
+                      serperEvidenceInList: agentEvidence.filter(e => e.source === 'serper:lovdata.no').length,
+                      lovdataEvidenceInList: agentEvidence.filter(e => e.source === 'lovdata').length
+                    }, 'runAssistant: evidence list after adding serper results');
                     
                     // Format function result with better guidance for agent
                     const organicResults = serperResult?.organic ?? [];
@@ -384,9 +406,41 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
         totalPages: Math.max(1, Math.ceil(agentEvidence.length / pageSize))
       };
 
+      // Log evidence breakdown before processing
+      const lovdataEvidenceCount = agentEvidence.filter(e => e.source === 'lovdata').length;
+      const serperEvidenceCount = agentEvidence.filter(e => e.source === 'serper:lovdata.no').length;
+      const otherEvidenceCount = agentEvidence.length - lovdataEvidenceCount - serperEvidenceCount;
+      logger.info({
+        totalEvidence: agentEvidence.length,
+        lovdataCount: lovdataEvidenceCount,
+        serperCount: serperEvidenceCount,
+        otherCount: otherEvidenceCount,
+        serperSample: agentEvidence.filter(e => e.source === 'serper:lovdata.no').slice(0, 3).map(e => ({
+          id: e.id,
+          title: e.title,
+          hasLink: !!e.link,
+          link: e.link
+        }))
+      }, 'runAssistant: evidence breakdown before link update');
+      
       // Update links for HTML content
       const evidenceWithUpdatedLinks = await updateLinksForHtmlContent(agentEvidence, services);
       logger.info({ updatedCount: evidenceWithUpdatedLinks.length }, 'runAssistant: links updated');
+      
+      // Log evidence breakdown after processing
+      const lovdataEvidenceCountAfter = evidenceWithUpdatedLinks.filter(e => e.source === 'lovdata').length;
+      const serperEvidenceCountAfter = evidenceWithUpdatedLinks.filter(e => e.source === 'serper:lovdata.no').length;
+      logger.info({
+        totalEvidence: evidenceWithUpdatedLinks.length,
+        lovdataCount: lovdataEvidenceCountAfter,
+        serperCount: serperEvidenceCountAfter,
+        serperSample: evidenceWithUpdatedLinks.filter(e => e.source === 'serper:lovdata.no').slice(0, 3).map(e => ({
+          id: e.id,
+          title: e.title,
+          hasLink: !!e.link,
+          link: e.link
+        }))
+      }, 'runAssistant: evidence breakdown after link update');
       
       // Update agentEvidence with updated links
       agentEvidence = evidenceWithUpdatedLinks;
@@ -402,12 +456,26 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
 
       logger.info({ usedAgent, hasAgentOutput: !!agentOutput }, 'runAssistant: building response');
 
+      // Final check: ensure serper evidence is included
+      const finalSerperEvidence = evidenceWithUpdatedLinks.filter(e => e.source === 'serper:lovdata.no');
+      const finalLovdataEvidence = evidenceWithUpdatedLinks.filter(e => e.source === 'lovdata');
+      logger.info({
+        finalTotalEvidence: evidenceWithUpdatedLinks.length,
+        finalSerperCount: finalSerperEvidence.length,
+        finalLovdataCount: finalLovdataEvidence.length,
+        finalSerperEvidence: finalSerperEvidence.map(e => ({
+          id: e.id,
+          title: e.title,
+          link: e.link
+        }))
+      }, 'runAssistant: final evidence list before response');
+
       let response: AssistantRunResponse;
       if (usedAgent && agentOutput) {
         logger.info('runAssistant: building response with agent output');
         response = {
           answer: agentOutput.answer ?? 'Jeg klarte ikke å generere et svar.',
-          evidence: evidenceWithUpdatedLinks,
+          evidence: evidenceWithUpdatedLinks, // This should include both lovdata-api and serper results
           citations: normaliseCitations(agentOutput.citations ?? [], evidenceWithUpdatedLinks, pagination),
           pagination,
           metadata: {
@@ -422,6 +490,8 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
         logger.info({
           answerLength: response.answer.length,
           evidenceCount: response.evidence.length,
+          serperEvidenceInResponse: response.evidence.filter(e => e.source === 'serper:lovdata.no').length,
+          lovdataEvidenceInResponse: response.evidence.filter(e => e.source === 'lovdata').length,
           citationsCount: response.citations.length
         }, 'runAssistant: response built with agent output');
       } else {
