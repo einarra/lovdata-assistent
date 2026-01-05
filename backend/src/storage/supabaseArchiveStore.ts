@@ -558,11 +558,13 @@ export class SupabaseArchiveStore {
 
           this.logs.info({
             rpcFunction: rpcFunctionName,
+            searchQuery: query,
             queryLength: query.length,
             embeddingLength: queryEmbedding.length,
             limit,
             offset,
-            searchType: 'chunks'
+            searchType: 'chunks',
+            filters: options.filters
           }, 'searchAsync: using hybrid search on chunks (FTS + Vector) with RRF');
         } else {
           // Fall back to FTS-only search on chunks
@@ -695,9 +697,28 @@ export class SupabaseArchiveStore {
 
               // Handle RPC result
               if (rpcResult.error) {
-                this.logs.error({ err: rpcResult.error, rpcFunction: rpcFunctionName }, 'searchAsync: RPC function failed');
+                this.logs.error({ 
+                  err: rpcResult.error, 
+                  rpcFunction: rpcFunctionName,
+                  searchQuery: query,
+                  rpcParams
+                }, 'searchAsync: RPC function failed');
                 throw rpcResult.error;
               }
+
+              // Log RPC result details for debugging
+              this.logs.info({
+                rpcFunction: rpcFunctionName,
+                resultCount: rpcResult.data?.length ?? 0,
+                hasData: !!rpcResult.data,
+                searchQuery: query,
+                sampleResult: rpcResult.data?.[0] ? {
+                  archive_filename: rpcResult.data[0].archive_filename,
+                  member: rpcResult.data[0].member,
+                  hasContent: !!rpcResult.data[0].content,
+                  contentLength: rpcResult.data[0].content?.length ?? 0
+                } : null
+              }, 'searchAsync: RPC function returned results');
 
               // Handle count result
               const total = countResult.count ?? 0;
@@ -705,6 +726,12 @@ export class SupabaseArchiveStore {
               // Map RPC result to expected format
               // Chunk search returns: { id, document_id, chunk_index, content, archive_filename, member, document_title, document_date, section_title, section_number, fts_rank, vector_distance, rrf_score }
               // Document search returns: { archive_filename, member, title, document_date, content, rank }
+              const rawDataCount = rpcResult.data?.length ?? 0;
+              this.logs.debug({ 
+                rawDataCount,
+                searchQuery: query 
+              }, 'searchAsync: mapping RPC results to expected format');
+              
               const data = (rpcResult.data || []).map((row: any) => {
                 // If this is a chunk result, use chunk-specific fields
                 if (row.chunk_index !== undefined) {
@@ -743,7 +770,10 @@ export class SupabaseArchiveStore {
                 raceDurationMs: raceDuration,
                 resolvedBy: 'query',
                 resultCount: data.length,
-                total
+                total,
+                searchQuery: query,
+                mappedDataCount: data.length,
+                rawDataCount
               }, 'searchAsync: internal Promise.race resolved - query won');
 
               return result;
@@ -1035,15 +1065,29 @@ export class SupabaseArchiveStore {
 
     // Generate snippets from content
     const snippetTimer = new Timer('generate_snippets', this.logs, { documentCount: data.length });
-    const hits: ArchiveSearchHit[] = data.map((doc: any) => {
+    const hits: ArchiveSearchHit[] = data
+      .filter((doc: any) => {
+        // Filter out documents/chunks without content
+        if (!doc.content || doc.content.trim().length === 0) {
+          this.logs.warn({
+            filename: doc.archive_filename,
+            member: doc.member,
+            hasContent: !!doc.content
+          }, 'searchAsync: filtering out result with no content');
+          return false;
+        }
+        return true;
+      })
+      .map((doc: any) => {
       // For chunks, use the chunk content directly (it's already a focused snippet)
       // For full documents, generate a snippet
       let snippet: string;
       if (doc.chunk_index !== undefined) {
         // Chunk result - use chunk content as snippet (truncate if needed)
-        snippet = doc.content.length > 300
-          ? doc.content.substring(0, 297) + '...'
-          : doc.content;
+        const content = doc.content || '';
+        snippet = content.length > 300
+          ? content.substring(0, 297) + '...'
+          : content;
 
         // Add section info to title if available
         let displayTitle = doc.title;
