@@ -1,11 +1,22 @@
 import type { SkillContext, SkillIO, SkillOutput } from '../skills-core.js';
-import { SerperClient, AGENT_RESTRICTED_PATTERNS } from '../../services/serperClient.js';
+import { SerperClient } from '../../services/serperClient.js';
 import { env } from '../../config/env.js';
 import { logger } from '../../logger.js';
+
+// Register sites for different document types
+const REGISTER_SITES = {
+  lov: 'https://lovdata.no/register/lover',
+  forskrift: 'https://lovdata.no/register/forskrifter',
+  avgjørelse: 'https://lovdata.no/register/avgjørelser',
+  kunngjøring: 'https://lovdata.no/register/lovtidend'
+} as const;
+
+type DocumentType = keyof typeof REGISTER_SITES;
 
 type SerperSkillInput = {
   action?: 'search';
   query: string;
+  documentType?: DocumentType;
   num?: number;
   site?: string;
   gl?: string;
@@ -30,13 +41,20 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
   const services = (ctx.services ?? {}) as Services;
   const client = services.serper;
   const input = normalizeInput(io.input);
-  const site = input.site ?? env.SERPER_SITE_FILTER;
+  
+  // Determine which register site to use based on documentType
+  // Default to 'avgjørelse' for agent calls to prioritize rettsavgjørelser
+  const isAgentCall = (ctx as any).agentCall === true;
+  const documentType: DocumentType = input.documentType ?? (isAgentCall ? 'avgjørelse' : 'lov');
+  const registerSite = REGISTER_SITES[documentType];
   
   logger.info({ 
     hasClient: !!client,
     query: input.query,
-    site,
-    hasApiKey: !!env.SERPER_API_KEY
+    documentType,
+    registerSite,
+    hasApiKey: !!env.SERPER_API_KEY,
+    isAgentCall
   }, 'lovdata-serper: checking client configuration');
   
   if (!client) {
@@ -45,7 +63,8 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
       result: {
         message: 'Serper API-nøkkel er ikke konfigurert. Sett SERPER_API_KEY for å aktivere nettsøk.',
         query: input.query,
-        site
+        documentType,
+        registerSite
       },
       meta: {
         skill: 'lovdata-serper',
@@ -54,109 +73,38 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
       }
     };
   }
-
-  // Check if this is an agent call (from context)
-  const isAgentCall = (ctx as any).agentCall === true;
   
   logger.info({ 
     query: input.query, 
-    site, 
-    targetDocuments: input.targetDocuments,
-    isAgentCall 
-  }, 'lovdata-serper: calling client.search');
+    documentType,
+    registerSite
+  }, 'lovdata-serper: calling client.search with register site');
   
   let response;
   try {
-    // Use document-targeted search if requested, or default to true for lovdata.no
-    const shouldTargetDocuments = input.targetDocuments ?? (site === 'lovdata.no' || site?.includes('lovdata.no'));
+    // Search on the specific register site
+    response = await client.search(input.query, {
+      num: input.num,
+      gl: input.gl ?? 'no',
+      hl: input.hl ?? 'no',
+      site: registerSite
+    });
     
-    if (shouldTargetDocuments || isAgentCall) {
-      // For agent calls, use restricted patterns; otherwise use default document search
-      const searchOptions: Parameters<typeof client.searchDocuments>[1] = {
-        num: input.num,
-        gl: input.gl,
-        hl: input.hl,
-        site: isAgentCall ? 'lovdata.no' : site, // Always lovdata.no for agent calls
-      };
-      
-      if (isAgentCall) {
-        // Agent calls: use restricted patterns only
-        searchOptions.restrictedPatterns = AGENT_RESTRICTED_PATTERNS;
-      }
-      
-      // Try document-specific search first
-      response = await client.searchDocuments(input.query, searchOptions);
-      logger.info({ 
-        hasOrganic: !!response.organic,
-        organicCount: Array.isArray(response.organic) ? response.organic.length : 0,
-        isAgentCall,
-        usedRestrictedPatterns: isAgentCall
-      }, 'lovdata-serper: client.searchDocuments completed');
-      
-      // If we got few results, also try a general search and merge (but not for agent calls)
-      if (!isAgentCall && (!response.organic || response.organic.length < 3)) {
-        logger.info('lovdata-serper: document search returned few results, trying general search');
-        try {
-          const generalResponse = await client.search(input.query, {
-            num: Math.max(5, (input.num ?? 10) - (response.organic?.length ?? 0)),
-            gl: input.gl,
-            hl: input.hl,
-            site
-          });
-          
-          // Merge results, prioritizing document links
-          const documentResults = response.organic ?? [];
-          const generalResults = generalResponse.organic ?? [];
-          
-          // Combine and deduplicate
-          const seenLinks = new Set<string>();
-          const combined: typeof response.organic = [];
-          
-          // Add document results first
-          for (const item of documentResults) {
-            if (item.link && !seenLinks.has(item.link)) {
-              seenLinks.add(item.link);
-              combined.push(item);
-            }
-          }
-          
-          // Add general results that aren't duplicates
-          for (const item of generalResults) {
-            if (item.link && !seenLinks.has(item.link)) {
-              seenLinks.add(item.link);
-              combined.push(item);
-            }
-          }
-          
-          response = { ...response, organic: combined };
-          logger.info({ 
-            documentCount: documentResults.length,
-            generalCount: generalResults.length,
-            combinedCount: combined.length
-          }, 'lovdata-serper: merged document and general search results');
-        } catch (generalError) {
-          logger.warn({ err: generalError }, 'lovdata-serper: general search fallback failed, using document results only');
-        }
-      }
-    } else {
-      response = await client.search(input.query, {
-        num: input.num,
-        gl: input.gl,
-        hl: input.hl,
-        site
-      });
-      logger.info({ 
-        hasOrganic: !!response.organic,
-        organicCount: Array.isArray(response.organic) ? response.organic.length : 0
-      }, 'lovdata-serper: client.search completed');
-    }
+    logger.info({ 
+      hasOrganic: !!response.organic,
+      organicCount: Array.isArray(response.organic) ? response.organic.length : 0,
+      documentType,
+      registerSite
+    }, 'lovdata-serper: client.search completed');
     
     // Prioritize document links in results
     response = SerperClient.prioritizeDocumentLinks(response);
   } catch (searchError) {
     logger.error({ 
       err: searchError,
-      stack: searchError instanceof Error ? searchError.stack : undefined
+      stack: searchError instanceof Error ? searchError.stack : undefined,
+      documentType,
+      registerSite
     }, 'lovdata-serper: client.search failed');
     throw searchError;
   }
@@ -169,17 +117,23 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
     isDocument: SerperClient.isDocumentLink(item.link) // Add flag to indicate if it's a document link
   }));
 
-  logger.info({ organicCount: organic.length }, 'lovdata-serper: processing results');
+  logger.info({ 
+    organicCount: organic.length,
+    documentType,
+    registerSite
+  }, 'lovdata-serper: processing results');
 
   return {
     result: {
       query: input.query,
-      site,
+      documentType,
+      registerSite,
       organic
     },
     meta: {
       skill: 'lovdata-serper',
       action: 'search',
+      documentType,
       totalOrganicResults: organic.length
     }
   };
@@ -191,13 +145,27 @@ function normalizeInput(input: unknown): SerperSkillInput {
   }
 
   if (input && typeof input === 'object') {
-    const candidate = input as Partial<SerperSkillInput> & { query?: unknown };
+    const candidate = input as Partial<SerperSkillInput> & { query?: unknown; documentType?: unknown };
     if (!candidate.query || typeof candidate.query !== 'string') {
       throw new Error('Serper skill requires a string query');
     }
+    
+    // Validate documentType if provided
+    let documentType: DocumentType | undefined;
+    if (candidate.documentType) {
+      if (typeof candidate.documentType === 'string' && candidate.documentType in REGISTER_SITES) {
+        documentType = candidate.documentType as DocumentType;
+      } else {
+        logger.warn({ 
+          providedDocumentType: candidate.documentType 
+        }, 'lovdata-serper: invalid documentType, ignoring');
+      }
+    }
+    
     return {
       action: 'search',
       query: candidate.query.trim(),
+      documentType,
       num: candidate.num,
       site: candidate.site,
       gl: candidate.gl,

@@ -1,30 +1,11 @@
 import { env } from '../config/env.js';
 
-// Restricted URL patterns for agent use (only these patterns will be searched)
-// Note: These patterns should match actual document URLs, not search/register pages
-// Patterns are ordered by priority - rettsavgjørelser is prioritized first
-export const AGENT_RESTRICTED_PATTERNS = [
-  '/avgjørelser/',  // Rettsavgjørelser - (flertall form)
-  '/avgjorelse/',   // Rettsavgjørelser - alternativ form
-  '/lover/',        // Law pattern
-  '/lov/',        // Law pattern - alternative form
-  '/forskrifter/',   // Regulation pattern
-  '/forskrift/',   // Regulation pattern - alternative form
-  '/lovtidend/',    // Lovtidend dokumenter (not /register/lovtidend)
-  '/husleietvistutvalget/',
-  '/trygderetten/',
-  '/sph2025/',
-  '/dokument/',     // General document pattern
- 
-] as const;
-
 export type SerperSearchOptions = {
   num?: number;
   gl?: string;
   hl?: string;
   site?: string;
   targetDocuments?: boolean; // If true, prioritize document pages (lov, forskrift, dokument)
-  restrictedPatterns?: readonly string[]; // Specific URL patterns to search (overrides targetDocuments patterns when provided)
 };
 
 export type SerperResponse = {
@@ -58,21 +39,8 @@ export class SerperClient {
     if (options.site) {
       const normalizedSite = options.site.replace(/^https?:\/\//, '').replace(/\/$/, '');
       
-      // Use restricted patterns if provided (for agent calls), otherwise use default targetDocuments logic
-      if (options.restrictedPatterns && options.restrictedPatterns.length > 0) {
-        // Agent-restricted patterns: only search in specific URL paths
-        // Exclude register/search pages to get direct document links
-        // Prioritize rettsavgjørelser by putting them first in the query
-        const prioritizedPatterns = [...options.restrictedPatterns].sort((a, b) => {
-          // Put /avgjørelser/ and /avgjørelse/ first
-          if (a.includes('avgjørelse')) return -1;
-          if (b.includes('avgjørelse')) return 1;
-          return 0;
-        });
-        const patternQueries = prioritizedPatterns.map(pattern => `inurl:${pattern}`).join(' OR ');
-        siteQuery = `site:${normalizedSite} (${patternQueries}) -inurl:/register/ -inurl:/sok/ -inurl:/search `;
-      } else if (options.targetDocuments) {
-        // Target common Lovdata document URL patterns (default for non-agent calls):
+      if (options.targetDocuments) {
+        // Target common Lovdata document URL patterns:
         // - /dokument/ (document pages)
         // - /lov/ (laws)
         // - /forskrift/ (regulations)
@@ -205,17 +173,12 @@ export class SerperClient {
   /**
    * Search specifically for document pages on Lovdata.no
    * This targets URLs containing /dokument/, /lov/, /forskrift/, etc.
-   * If restrictedPatterns is provided, only those patterns will be used (overrides targetDocuments).
    */
   async searchDocuments(query: string, options: Omit<SerperSearchOptions, 'targetDocuments'> = {}): Promise<SerperResponse> {
-    // If restrictedPatterns is provided, use it (don't set targetDocuments)
-    // Otherwise, use targetDocuments: true for default behavior
     const searchOptions: SerperSearchOptions = {
-      ...options
+      ...options,
+      targetDocuments: true
     };
-    if (!options.restrictedPatterns) {
-      searchOptions.targetDocuments = true;
-    }
     return this.search(query, searchOptions);
   }
 

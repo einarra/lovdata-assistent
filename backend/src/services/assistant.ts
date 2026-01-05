@@ -344,15 +344,19 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
                     const searchParams = JSON.parse(functionCall.arguments);
                     // Increase num to get more results - we'll filter to document links anyway
                     const numResults = Math.max(searchParams.num || 10, 20);
-                    logger.info({ searchParams, numResults }, 'runAssistant: executing serper search');
+                    logger.info({ 
+                      searchParams, 
+                      numResults,
+                      documentType: searchParams.documentType 
+                    }, 'runAssistant: executing serper search');
                     
                     const skillResult = await orchestrator.run(
                       {
                         input: {
                           action: 'search',
                           query: searchParams.query,
-                          num: numResults, // Request more results to increase chance of getting document links
-                          site: 'lovdata.no'
+                          documentType: searchParams.documentType, // Pass documentType to skill
+                          num: numResults // Request more results to increase chance of getting document links
                         },
                         hints: { preferredSkill: 'lovdata-serper' }
                       },
