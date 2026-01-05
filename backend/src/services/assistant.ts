@@ -112,6 +112,9 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
       let usedAgent = false;
       const maxAgentIterations = 5; // Prevent infinite loops
       const functionResults: AgentFunctionResult[] = [];
+      // Store pending evidence that hasn't been confirmed as relevant yet
+      // Evidence is added when agent doesn't refine the search (assumes relevance)
+      const pendingEvidenceMap = new Map<string, AgentEvidence[]>();
       
       // Get agent
       const agent = getAgent();
@@ -143,12 +146,56 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
             
             const agentResult = await agent.generate(agentInput);
             
+            // Before processing new function calls, check if agent has confirmed previous results
+            // If agent doesn't call search_lovdata_legal_documents again, assume previous results were accepted
+            // Add pending evidence from previous searches that weren't refined
+            const currentSearchFunctionNames = agentResult.functionCalls?.map(fc => fc.name) ?? [];
+            const hasNewLovdataSearch = currentSearchFunctionNames.includes('search_lovdata_legal_documents');
+            
+            if (!hasNewLovdataSearch && pendingEvidenceMap.size > 0) {
+              // Agent didn't refine the search, so add pending evidence
+              logger.info({
+                pendingEvidenceCount: Array.from(pendingEvidenceMap.values()).flat().length,
+                message: 'Agent did not refine search - adding pending evidence as confirmed relevant'
+              }, 'runAssistant: adding pending evidence');
+              
+              for (const [key, evidence] of pendingEvidenceMap.entries()) {
+                agentEvidence = [...agentEvidence, ...evidence];
+              }
+              pendingEvidenceMap.clear();
+            }
+            
+            // If agent provided final answer (no function calls), add any pending evidence
+            if (!agentResult.functionCalls || agentResult.functionCalls.length === 0) {
+              if (pendingEvidenceMap.size > 0) {
+                logger.info({
+                  pendingEvidenceCount: Array.from(pendingEvidenceMap.values()).flat().length,
+                  message: 'Agent provided final answer - adding pending evidence as confirmed relevant'
+                }, 'runAssistant: adding pending evidence before final answer');
+                
+                for (const [key, evidence] of pendingEvidenceMap.entries()) {
+                  agentEvidence = [...agentEvidence, ...evidence];
+                }
+                pendingEvidenceMap.clear();
+              }
+            }
+            
             // Check if agent wants to call a function
             if (agentResult.functionCalls && agentResult.functionCalls.length > 0) {
               logger.info({
                 functionCallsCount: agentResult.functionCalls.length,
-                functionNames: agentResult.functionCalls.map(fc => fc.name)
+                functionNames: agentResult.functionCalls.map(fc => fc.name),
+                hasNewLovdataSearch
               }, 'runAssistant: agent requested function calls');
+              
+              // If agent is refining the search, clear pending evidence from previous searches
+              if (hasNewLovdataSearch) {
+                logger.info({
+                  clearedPendingCount: Array.from(pendingEvidenceMap.values()).flat().length,
+                  message: 'Agent refining search - clearing pending evidence from previous search'
+                }, 'runAssistant: clearing pending evidence due to search refinement');
+                pendingEvidenceMap.clear();
+              }
               
               // Execute each function call
               for (const functionCall of agentResult.functionCalls) {
@@ -233,6 +280,7 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
                       } : null
                     }, 'runAssistant: evidence conversion result');
                     
+                    // DON'T add evidence to agentEvidence yet - let agent evaluate first
                     // Deduplicate evidence by (filename, member) to avoid duplicates
                     const existingKeys = new Set(agentEvidence.map(e => `${e.metadata?.filename}:${e.metadata?.member}`));
                     const uniqueNewEvidence = newEvidence.filter(e => {
@@ -244,48 +292,52 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
                       return true;
                     });
                     
-                    agentEvidence = [...agentEvidence, ...uniqueNewEvidence];
-                    
-                    // Add evidence to list (agent needs to see results to evaluate)
-                    // But mark them as pending evaluation
-                    agentEvidence = [...agentEvidence, ...uniqueNewEvidence];
-                    
                     // Format function result with evaluation guidance for agent
-                    // Include sample results so agent can evaluate relevance
-                    const sampleHits = (lovdataResult.hits ?? []).slice(0, 5).map((hit, idx) => ({
+                    // Include ALL results (not just samples) so agent can evaluate properly
+                    const allHits = (lovdataResult.hits ?? []).map((hit, idx) => ({
                       index: idx + 1,
                       title: hit.title,
-                      snippet: hit.snippet?.substring(0, 300) ?? '',
+                      snippet: hit.snippet?.substring(0, 500) ?? '', // Longer snippet for better evaluation
                       filename: hit.filename,
                       member: hit.member
                     }));
                     
                     const formattedResult = {
-                      ...lovdataResult,
+                      ...lovdataResult, // Include all original fields
+                      hits: allHits, // Replace hits with formatted version for evaluation
                       _guidance: {
                         hitsFound: lovdataResult.hits?.length ?? 0,
                         totalHits: lovdataResult.totalHits ?? 0,
-                        sampleResults: sampleHits,
                         evaluationRequired: true,
+                        originalQuery: searchParams.query,
+                        userQuestion: options.question,
                         message: lovdataResult.hits && lovdataResult.hits.length > 0
-                          ? `VIKTIG: Evaluér relevansen av disse ${lovdataResult.hits.length} resultatene (${lovdataResult.totalHits} totalt). Sjekk om resultatene faktisk svarer på brukerens spørsmål basert på titler og utdrag. Hvis resultatene er irrelevante eller ikke gir nok informasjon, forbedre søkeordene og søk på nytt med mer spesifikke termer, annen dokumenttype (lawType), eller justert år-filter. Du kan søke flere ganger for å finne bedre resultater.`
+                          ? `VIKTIG EVALUERING: Du har fått ${lovdataResult.hits.length} søkeresultater (${lovdataResult.totalHits} totalt) for søket "${searchParams.query}". FØR DU GÅR VIDERE, må du evaluere om disse resultatene faktisk svarer på brukerens spørsmål "${options.question}". Se på titlene og utdragene nedenfor. Hvis resultatene er irrelevante eller ikke gir nok informasjon, må du forbedre søkeordene og søke på nytt. Du kan: 1) Bruke mer spesifikke søkeord, 2) Prøve annen dokumenttype (lawType), 3) Justere år-filteret, 4) Prøve bredere eller smalere søkeord. Kun relevante resultater skal brukes i svaret. Hvis resultatene er relevante, kan du gå videre og svare på spørsmålet.`
                           : `Ingen resultater funnet for dette søket. Vurder å prøve annen dokumenttype (lawType), år, eller bredere søkeord.`
                       }
                     };
                     
                     // Add to function results for next iteration - agent will evaluate
+                    // Evidence will NOT be added to agentEvidence until agent confirms they are relevant
                     functionResults.push({
                       name: functionCall.name,
                       result: formattedResult,
                       toolCallId: functionCall.toolCallId
                     });
                     
+                    // Store pending evidence that can be added if agent confirms relevance
+                    // We'll add it in the next iteration if agent doesn't refine the search
+                    const pendingEvidenceKey = `pending_${functionCall.toolCallId}`;
+                    pendingEvidenceMap.set(pendingEvidenceKey, uniqueNewEvidence);
+                    
                     logger.info({
                       hitsCount: lovdataResult.hits?.length ?? 0,
                       newEvidenceCount: newEvidence.length,
-                      evidenceAddedToAgent: uniqueNewEvidence.length,
-                      message: 'Evidence added to list - agent should evaluate and potentially refine search'
-                    }, 'runAssistant: lovdata-api search completed - agent should evaluate results');
+                      uniqueEvidenceCount: uniqueNewEvidence.length,
+                      pendingEvidenceKey,
+                      pendingEvidenceMapSize: pendingEvidenceMap.size,
+                      message: 'Evidence NOT added yet - waiting for agent evaluation. Agent must evaluate results and either refine search or confirm relevance by not searching again.'
+                    }, 'runAssistant: lovdata-api search completed - waiting for agent evaluation');
                     
                   } else if (functionCall.name === 'search_lovdata_legal_practice') {
                     // Execute lovdata-serper skill
