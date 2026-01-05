@@ -1216,7 +1216,9 @@ function convertSerperResultsToEvidence(organic: Array<{
       title: item.title,
       link: item.link,
       isDocument: item.isDocument,
-      isDocumentLinkCheck: item.link ? SerperClient.isDocumentLink(item.link) : false
+      isDocumentLinkCheck: item.link ? SerperClient.isDocumentLink(item.link) : false,
+      isRegisterPage: item.link ? /\/register\//.test(item.link) : false,
+      hasQueryParams: item.link ? /\?/.test(item.link) : false
     }))
   }, 'convertSerperResultsToEvidence: processing organic results');
   
@@ -1240,7 +1242,10 @@ function convertSerperResultsToEvidence(organic: Array<{
           link: item.link,
           title: item.title,
           isDocument: item.isDocument,
-          isDocumentLinkCheck: SerperClient.isDocumentLink(item.link)
+          isDocumentLinkCheck: SerperClient.isDocumentLink(item.link),
+          isRegisterPage: /\/register\//.test(item.link),
+          hasQueryParams: /\?/.test(item.link),
+          reason: /\/register\//.test(item.link) ? 'register_page' : (/\?/.test(item.link) ? 'has_query_params' : 'not_document_pattern')
         }, 'convertSerperResultsToEvidence: filtering out non-document link');
         return false;
       }

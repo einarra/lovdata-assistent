@@ -191,6 +191,7 @@ export class SerperClient {
     
     // Exclude register pages, search pages, and other non-document pages
     const excludePatterns = [
+      /\/register\//,  // Exclude all register pages (search/list pages)
       /\/sok\//,
       /\/search/,
       /\/resultat/,
@@ -198,6 +199,7 @@ export class SerperClient {
       /\/liste/,
       /\/index/,
       /\?.*kunngjortDato/,  // Query parameters indicating search/register pages
+      /\?.*q=/,  // Query parameters with search queries (e.g., ?q=...)
     ];
     
     if (excludePatterns.some(pattern => pattern.test(url))) {
