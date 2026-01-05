@@ -1,12 +1,16 @@
 import { env } from '../config/env.js';
 
 // Restricted URL patterns for agent use (only these patterns will be searched)
+// Note: These patterns should match actual document URLs, not search/register pages
 export const AGENT_RESTRICTED_PATTERNS = [
-  '/avgjørelser/',
-  '/lovtidend/',
+  '/avgjørelser/',  // Rettsavgjørelser
+  '/lovtidend/',    // Lovtidend dokumenter (not /register/lovtidend)
   '/husleietvistutvalget/',
   '/trygderetten/',
-  '/sph2025/'
+  '/sph2025/',
+  '/dokument/',     // Add general document pattern
+  '/lover/',          // Add law pattern
+  '/forskrifter/'     // Add regulation pattern
 ] as const;
 
 export type SerperSearchOptions = {
@@ -52,13 +56,14 @@ export class SerperClient {
       // Use restricted patterns if provided (for agent calls), otherwise use default targetDocuments logic
       if (options.restrictedPatterns && options.restrictedPatterns.length > 0) {
         // Agent-restricted patterns: only search in specific URL paths
+        // Exclude register/search pages to get direct document links
         const patternQueries = options.restrictedPatterns.map(pattern => `inurl:${pattern}`).join(' OR ');
-        siteQuery = `site:${normalizedSite} (${patternQueries}) `;
+        siteQuery = `site:${normalizedSite} (${patternQueries}) -inurl:/register/ -inurl:/sok/ -inurl:/search `;
       } else if (options.targetDocuments) {
         // Target common Lovdata document URL patterns (default for non-agent calls):
         // - /dokument/ (document pages)
-        // - /lov/ (laws)
-        // - /forskrift/ (regulations)
+        // - /lover/ (laws)
+        // - /forskrifter/ (regulations)
         // - /rundskriv/ (circulars)
         // - /vedtak/ (decisions)
         // - /avgjørelser/ (decisions)
@@ -70,7 +75,7 @@ export class SerperClient {
         // - /tariffavtaler/ (collective agreements)
         // - /husleietvistutvalget/ (rent dispute committee)
         // - /sph2025/ (State Personnel Handbook 2025)
-        siteQuery = `site:${normalizedSite} (inurl:/dokument/ OR inurl:/lov/ OR inurl:/forskrift/ OR inurl:/rundskriv/ OR inurl:/vedtak/ OR inurl:/avgjørelser/ OR inurl:/lokaleForskrifte/ OR inurl:/lovtidend/ OR inurl:/eosavtalen/ OR inurl:/traktater/ OR inurl:/trygderetten/ OR inurl:/tariffavtaler/ OR inurl:/husleietvistutvalget/ OR inurl:/sph2025/) `;
+        siteQuery = `site:${normalizedSite} (inurl:/dokument/ OR inurl:/lover/ OR inurl:/forskrifter/ OR inurl:/rundskriv/ OR inurl:/vedtak/ OR inurl:/avgjørelser/ OR inurl:/lokaleForskrifte/ OR inurl:/lovtidend/ OR inurl:/eosavtalen/ OR inurl:/traktater/ OR inurl:/trygderetten/ OR inurl:/tariffavtaler/ OR inurl:/husleietvistutvalget/ OR inurl:/sph2025/) `;
       } else {
         siteQuery = `site:${normalizedSite} `;
       }
@@ -204,20 +209,39 @@ export class SerperClient {
 
   /**
    * Check if a URL is a direct document link on Lovdata.no
+   * Excludes register pages, search pages, and other non-document pages
    */
   static isDocumentLink(url: string | null | undefined): boolean {
     if (!url) return false;
+    
+    // Exclude register pages, search pages, and other non-document pages
+    const excludePatterns = [
+      /\/register\//,
+      /\/sok\//,
+      /\/search/,
+      /\/resultat/,
+      /\/oversikt/,
+      /\/liste/,
+      /\/index/,
+      /\?.*kunngjortDato/,  // Query parameters indicating search/register pages
+    ];
+    
+    if (excludePatterns.some(pattern => pattern.test(url))) {
+      return false;
+    }
+    
+    // Include document patterns
     const documentPatterns = [
       /\/dokument\//,
-      /\/lov\//,
-      /\/forskrift\//,
+      /\/lover\//,
+      /\/forskrifter\//,
       /\/rundskriv\//,
       /\/vedtak\//,
       /\/lovsamling\//,
       /\/historikk\//,
       /\/avgjørelser\//,
       /\/lokaleForskrifte\//,
-      /\/lovtidend\//,
+      /\/lovtidend\//,  // But not /register/lovtidend (excluded above)
       /\/eosavtalen\//,
       /\/traktater\//,
       /\/trygderetten\//,
