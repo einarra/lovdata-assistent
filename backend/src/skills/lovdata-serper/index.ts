@@ -3,20 +3,9 @@ import { SerperClient } from '../../services/serperClient.js';
 import { env } from '../../config/env.js';
 import { logger } from '../../logger.js';
 
-// Register sites for different document types
-const REGISTER_SITES = {
-  lov: 'https://lovdata.no/register/lover',
-  forskrift: 'https://lovdata.no/register/forskrifter',
-  avgjørelse: 'https://lovdata.no/register/avgjørelser',
-  kunngjøring: 'https://lovdata.no/register/lovtidend'
-} as const;
-
-type DocumentType = keyof typeof REGISTER_SITES;
-
 type SerperSkillInput = {
   action?: 'search';
   query: string;
-  documentType?: DocumentType;
   num?: number;
   site?: string;
   gl?: string;
@@ -42,19 +31,10 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
   const client = services.serper;
   const input = normalizeInput(io.input);
   
-  // Determine which register site to use based on documentType
-  // Default to 'avgjørelse' for agent calls to prioritize rettsavgjørelser
-  const isAgentCall = (ctx as any).agentCall === true;
-  const documentType: DocumentType = input.documentType ?? (isAgentCall ? 'avgjørelse' : 'lov');
-  const registerSite = REGISTER_SITES[documentType];
-  
   logger.info({ 
     hasClient: !!client,
     query: input.query,
-    documentType,
-    registerSite,
-    hasApiKey: !!env.SERPER_API_KEY,
-    isAgentCall
+    hasApiKey: !!env.SERPER_API_KEY
   }, 'lovdata-serper: checking client configuration');
   
   if (!client) {
@@ -62,9 +42,7 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
     return {
       result: {
         message: 'Serper API-nøkkel er ikke konfigurert. Sett SERPER_API_KEY for å aktivere nettsøk.',
-        query: input.query,
-        documentType,
-        registerSite
+        query: input.query
       },
       meta: {
         skill: 'lovdata-serper',
@@ -74,44 +52,26 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
     };
   }
   
-  // Map documentType to specific inurl patterns for document links
-  // Instead of searching on register pages (which return search pages), 
-  // we search on lovdata.no with specific document URL patterns
-  const documentTypePatterns: Record<DocumentType, string[]> = {
-    lov: ['/dokument/', '/lov/', '/lover/'],
-    forskrift: ['/dokument/', '/forskrift/', '/forskrifter/'],
-    avgjørelse: ['/dokument/', '/avgjørelser/', '/avgjorelse/'],
-    kunngjøring: ['/dokument/', '/lovtidend/']
-  };
-  
-  const patternsForType = documentType ? documentTypePatterns[documentType] : documentTypePatterns.avgjørelse;
-  
   logger.info({ 
-    query: input.query, 
-    documentType,
-    registerSite,
-    patternsForType,
-    searchStrategy: 'lovdata.no with document patterns'
-  }, 'lovdata-serper: calling client.search with document patterns');
+    query: input.query,
+    searchStrategy: 'lovdata.no with targetDocuments'
+  }, 'lovdata-serper: calling client.search on lovdata.no');
   
   let response;
   try {
-    // Search on lovdata.no (not register pages) with targetDocuments to get actual document links
+    // Search on lovdata.no with targetDocuments to get actual document links
     // This ensures we get links to documents, not search/register pages
     response = await client.search(input.query, {
       num: input.num,
       gl: input.gl ?? 'no',
       hl: input.hl ?? 'no',
       site: 'lovdata.no',
-      targetDocuments: true, // This will use inurl patterns to find document links
-      documentTypePatterns: patternsForType // Prioritize specific patterns for this document type
+      targetDocuments: true // This will use inurl patterns to find document links
     });
     
     logger.info({ 
       hasOrganic: !!response.organic,
-      organicCount: Array.isArray(response.organic) ? response.organic.length : 0,
-      documentType,
-      registerSite
+      organicCount: Array.isArray(response.organic) ? response.organic.length : 0
     }, 'lovdata-serper: client.search completed');
     
     // Prioritize document links in results
@@ -119,9 +79,7 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
   } catch (searchError) {
     logger.error({ 
       err: searchError,
-      stack: searchError instanceof Error ? searchError.stack : undefined,
-      documentType,
-      registerSite
+      stack: searchError instanceof Error ? searchError.stack : undefined
     }, 'lovdata-serper: client.search failed');
     throw searchError;
   }
@@ -135,22 +93,17 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
   }));
 
   logger.info({ 
-    organicCount: organic.length,
-    documentType,
-    registerSite
+    organicCount: organic.length
   }, 'lovdata-serper: processing results');
 
   return {
     result: {
       query: input.query,
-      documentType,
-      registerSite,
       organic
     },
     meta: {
       skill: 'lovdata-serper',
       action: 'search',
-      documentType,
       totalOrganicResults: organic.length
     }
   };
@@ -162,27 +115,14 @@ function normalizeInput(input: unknown): SerperSkillInput {
   }
 
   if (input && typeof input === 'object') {
-    const candidate = input as Partial<SerperSkillInput> & { query?: unknown; documentType?: unknown };
+    const candidate = input as Partial<SerperSkillInput> & { query?: unknown };
     if (!candidate.query || typeof candidate.query !== 'string') {
       throw new Error('Serper skill requires a string query');
-    }
-    
-    // Validate documentType if provided
-    let documentType: DocumentType | undefined;
-    if (candidate.documentType) {
-      if (typeof candidate.documentType === 'string' && candidate.documentType in REGISTER_SITES) {
-        documentType = candidate.documentType as DocumentType;
-      } else {
-        logger.warn({ 
-          providedDocumentType: candidate.documentType 
-        }, 'lovdata-serper: invalid documentType, ignoring');
-      }
     }
     
     return {
       action: 'search',
       query: candidate.query.trim(),
-      documentType,
       num: candidate.num,
       site: candidate.site,
       gl: candidate.gl,
