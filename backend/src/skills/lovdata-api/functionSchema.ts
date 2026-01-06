@@ -36,7 +36,7 @@ VIKTIG: Når du får søkeresultater, evaluer dem først:
       },
       year: {
         type: 'number',
-        description: 'År for dokumentet. VIKTIG: For søk etter lover og forskrifter, sett year til minst 2021 (siste 5 år) med mindre brukeren eksplisitt ber om eldre dokumenter eller spesifiserer et annet år. Hvis brukeren nevner et år (f.eks. "2023", "fra 2020"), bruk det året. Hvis ikke spesifisert og du søker etter lover/forskrifter, bruk 2021 eller nyere.'
+        description: 'År for dokumentet',
       },
       ministry: {
         type: 'string',

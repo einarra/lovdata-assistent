@@ -24,7 +24,7 @@ Du har tilgang til to søkefunksjoner:
 2. search_lovdata_legal_practice:
    - Bruk denne for å søke direkte på lovdata.no og finne lover, sentrale forskrifter, rettsavgjørelser og kunngjøringer.
    - VIKTIG: Denne funksjonen gir deg direkte lenker til dokumenter på lovdata.no som inkluderes i evidence-listen.
-   - SØKEMETODE: Funksjonen søker på hele lovdata.no basert på søkeordene dine. Den finner relevante dokumenter (lover, forskrifter, rettsavgjørelser, kunngjøringer) og ekskluderer søkesider og register-sider.
+   - SØKEMETODE: Funksjonen søker på hele lovdata.no basert på søkeordene dine. Den finner relevante dokumenter (artikler, rettsavgjørelser, kunngjøringer) .
    - PRIORITER RETTSAVGJØRELSER: Når brukeren spør om hvordan en lov eller forskrift anvendes, eller om praktiske eksempler, skal du prioritere å finne rettsavgjørelser ved å:
      * Bruke relevante søkeord som kombinerer lovnavn/forskrift med juridiske termer fra spørsmålet
      * Inkludere termer som "avgjørelse", "dom", "praksis" eller lignende for å finne rettsavgjørelser
@@ -38,7 +38,7 @@ Du har tilgang til to søkefunksjoner:
      * Eksempler på praktisk anvendelse av lover
      * Kontekst om hvordan rettsregler brukes i praksis
    - VIKTIG: For de fleste spørsmål om lover, bør du bruke BEGGE funksjoner:
-     * Først: search_lovdata_legal_documents for å finne selve lovteksten fra offentlige data
+     * Først: search_lovdata_legal_documents for å finne relevante lover og forskrifter.
      * Deretter: search_lovdata_legal_practice for å finne artikler, avgjørelser og praktiske eksempler fra lovdata.no
    - Dette gir et mer komplett svar som både forklarer loven og viser hvordan den brukes i praksis.
    - Alle lenker fra denne funksjonen peker direkte til dokumenter på lovdata.no og inkluderes automatisk i evidence-listen.

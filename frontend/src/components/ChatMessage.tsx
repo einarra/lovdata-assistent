@@ -4,39 +4,97 @@ import './ChatMessage.css';
 
 // Helper function to render message content with clickable links
 function renderMessageContent(content: string): React.ReactNode {
-  // Check if content contains HTML links
-  const linkRegex = /<a\s+href=["']([^"']+)["'][^>]*>([^<]+)<\/a>/gi;
   const parts: React.ReactNode[] = [];
   let lastIndex = 0;
-  let match;
+  let keyCounter = 0;
   
-  while ((match = linkRegex.exec(content)) !== null) {
-    // Add text before the link
-    if (match.index > lastIndex) {
-      parts.push(content.substring(lastIndex, match.index));
-    }
-    
-    // Add the link as a clickable element
-    const href = match[1];
-    const linkText = match[2];
-    parts.push(
-      <a 
-        key={match.index} 
-        href={href} 
-        target="_blank" 
-        rel="noreferrer noopener"
-        className="message-link"
-      >
-        {linkText}
-      </a>
-    );
-    
-    lastIndex = match.index + match[0].length;
+  // First, handle HTML links (<a> tags)
+  const htmlLinkRegex = /<a\s+href=["']([^"']+)["'][^>]*>([^<]+)<\/a>/gi;
+  const htmlLinks: Array<{ index: number; length: number; href: string; text: string }> = [];
+  let htmlMatch;
+  
+  while ((htmlMatch = htmlLinkRegex.exec(content)) !== null) {
+    htmlLinks.push({
+      index: htmlMatch.index,
+      length: htmlMatch[0].length,
+      href: htmlMatch[1],
+      text: htmlMatch[2]
+    });
   }
   
-  // Add remaining text after the last link
+  // Then, find plain URLs (https:// or http://) that are not inside HTML tags
+  const urlRegex = /https?:\/\/[^\s<>"']+/gi;
+  const plainUrls: Array<{ index: number; length: number; url: string }> = [];
+  let urlMatch;
+  
+  while ((urlMatch = urlRegex.exec(content)) !== null) {
+    // Check if this URL is inside an HTML link tag
+    const isInsideHtmlLink = htmlLinks.some(htmlLink => 
+      urlMatch.index >= htmlLink.index && 
+      urlMatch.index < htmlLink.index + htmlLink.length
+    );
+    
+    if (!isInsideHtmlLink) {
+      plainUrls.push({
+        index: urlMatch.index,
+        length: urlMatch[0].length,
+        url: urlMatch[0]
+      });
+    }
+  }
+  
+  // Combine and sort all matches by index
+  const allMatches = [
+    ...htmlLinks.map(link => ({ ...link, type: 'html' as const })),
+    ...plainUrls.map(url => ({ ...url, type: 'plain' as const }))
+  ].sort((a, b) => a.index - b.index);
+  
+  // Process all matches
+  for (const match of allMatches) {
+    // Add text before the match
+    if (match.index > lastIndex) {
+      const textBefore = content.substring(lastIndex, match.index);
+      if (textBefore) {
+        parts.push(textBefore);
+      }
+    }
+    
+    // Add the link
+    if (match.type === 'html') {
+      parts.push(
+        <a 
+          key={`link-${keyCounter++}`}
+          href={match.href} 
+          target="_blank" 
+          rel="noreferrer noopener"
+          className="message-link"
+        >
+          {match.text}
+        </a>
+      );
+    } else {
+      parts.push(
+        <a 
+          key={`link-${keyCounter++}`}
+          href={match.url} 
+          target="_blank" 
+          rel="noreferrer noopener"
+          className="message-link"
+        >
+          {match.url}
+        </a>
+      );
+    }
+    
+    lastIndex = match.index + match.length;
+  }
+  
+  // Add remaining text after the last match
   if (lastIndex < content.length) {
-    parts.push(content.substring(lastIndex));
+    const remainingText = content.substring(lastIndex);
+    if (remainingText) {
+      parts.push(remainingText);
+    }
   }
   
   // If no links were found, return content as-is
