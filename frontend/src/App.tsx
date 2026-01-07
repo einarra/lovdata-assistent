@@ -361,7 +361,7 @@ function App() {
         <header className="app-header">
           <div className="header-content">
             <div className="header-info">
-              <h1>Lovdata Assistent</h1>
+              <h1>LovSvar</h1>
               <p>Velg et nytt passord for å fortsette.</p>
             </div>
           </div>
@@ -415,7 +415,7 @@ function App() {
         <header className="app-header">
           <div className="header-content">
             <div className="header-info">
-              <h1>Lovdata Assistent</h1>
+              <h1>LovSvar</h1>
               <p>Logg inn med e-post for å chatte med norske juridiske data.</p>
             </div>
           </div>
@@ -494,7 +494,7 @@ function App() {
         <header className="app-header">
           <div className="header-content">
             <div className="header-info">
-              <h1>Lovdata Assistent</h1>
+              <h1>LovSvar</h1>
               <p>Personvern og samtykke</p>
             </div>
           </div>
@@ -519,7 +519,7 @@ function App() {
                 setActiveView('chat');
               }}
             >
-              <h1>Lovdata Assistent</h1>
+              <h1>LovSvar</h1>
             </a>
             <p>Chat med norske juridiske data fra Lovdata.no</p>
           </div>
@@ -532,7 +532,7 @@ function App() {
                 setActiveView((prev) => (prev === 'about' ? 'chat' : 'about'));
               }}
             >
-              Om Lovdata Assistent
+              Om LovSvar
             </a>
             <a
               className={`header-nav-link ${activeView === 'contact' ? 'active' : ''}`}
