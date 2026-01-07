@@ -26,15 +26,16 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ messages, isLoading, inp
       <div className="chat-messages">
         {messages.length === 0 ? (
           <div className="empty-state">
-            <h2>Lovdata Assistent</h2>
+            <h2>LovSvar</h2>
             <p>
-              Chat med norsk juridisk data fra Lovdata.no. Still spørsmål om lover, forskrifter og juridiske dokumenter.
+               LovSvar er en chatbot som kan gi svar på spørsmål om norske juridiske data fra Lovdata.no.
+              
             </p>
             <ul className="empty-state-list">
-              Assistenten kan:
+              LovSvar kan:
               <li>Søke gjennom juridiske dokumenter</li>
               <li>Trekke ut og analysere juridisk innhold</li>
-              <li>Få svar på spørsmål om norske lover og forskrifter</li>
+              <li>Gi svar på spørsmål fra brukeren</li>
             </ul>
           </div>
         ) : (
