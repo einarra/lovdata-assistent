@@ -1,9 +1,10 @@
+import { type ReactNode } from 'react';
 import type { AssistantRunResponse } from '../services/api';
 import type { Message } from '../types/chat';
 import './ChatMessage.css';
 
 // Helper function to render message content with clickable links
-function renderMessageContent(content: string): React.ReactNode {
+function renderMessageContent(content: string): ReactNode {
   const parts: React.ReactNode[] = [];
   let lastIndex = 0;
   let keyCounter = 0;
@@ -25,13 +26,13 @@ function renderMessageContent(content: string): React.ReactNode {
   // Then, find plain URLs (https:// or http://) that are not inside HTML tags
   const urlRegex = /https?:\/\/[^\s<>"']+/gi;
   const plainUrls: Array<{ index: number; length: number; url: string }> = [];
-  let urlMatch;
+  let urlMatch: RegExpExecArray | null;
   
   while ((urlMatch = urlRegex.exec(content)) !== null) {
     // Check if this URL is inside an HTML link tag
     const isInsideHtmlLink = htmlLinks.some(htmlLink => 
-      urlMatch.index >= htmlLink.index && 
-      urlMatch.index < htmlLink.index + htmlLink.length
+      urlMatch!.index >= htmlLink.index && 
+      urlMatch!.index < htmlLink.index + htmlLink.length
     );
     
     if (!isInsideHtmlLink) {
