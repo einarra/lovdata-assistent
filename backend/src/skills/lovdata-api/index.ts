@@ -194,30 +194,57 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
             message: 'Query mentions "lov" - prioritizing Lov results'
           }, 'Prioritized search: query mentions lov');
         } else {
-          // No explicit mention - use standard logic: prefer type with more results
+          // No explicit mention - ALWAYS prioritize Lov (priority 1) over Forskrift (priority 2)
+          // Lov is the highest priority, so prefer it even if Forskrift has more results
           if (lovHitCount >= minResults) {
+            // Lov has enough results - use it (highest priority)
             searchResult = lovResult;
             foundEnoughResults = true;
+            logger.info({
+              query: command.query,
+              lovHits: lovHitCount,
+              forskriftHits: forskriftHitCount,
+              message: 'Prioritizing Lov results (priority 1) - met minResults threshold'
+            }, 'Prioritized search: Lov met threshold');
+          } else if (lovHitCount > 0) {
+            // Lov has some results but not enough - still prioritize it over Forskrift
+            searchResult = lovResult;
+            bestResult = lovResult;
+            logger.info({
+              query: command.query,
+              lovHits: lovHitCount,
+              forskriftHits: forskriftHitCount,
+              message: 'Prioritizing Lov results (priority 1) - has results even if below threshold'
+            }, 'Prioritized search: Lov prioritized despite low count');
           } else if (forskriftHitCount >= minResults) {
+            // Lov has no results, but Forskrift has enough - use Forskrift as fallback
             searchResult = forskriftResult;
             foundEnoughResults = true;
-          } else {
-            // Neither has enough results - choose the one with more hits
-            if (forskriftHitCount >= lovHitCount) {
-              bestResult = forskriftResult;
-            } else {
-              bestResult = lovResult;
-            }
+            logger.info({
+              query: command.query,
+              lovHits: lovHitCount,
+              forskriftHits: forskriftHitCount,
+              message: 'Using Forskrift results - Lov had no results'
+            }, 'Prioritized search: Forskrift fallback (Lov had no results)');
+          } else if (forskriftHitCount > 0) {
+            // Neither has enough, but Forskrift has some results - use as fallback
+            bestResult = forskriftResult;
+            logger.info({
+              query: command.query,
+              lovHits: lovHitCount,
+              forskriftHits: forskriftHitCount,
+              message: 'Using Forskrift as best result - Lov had no results'
+            }, 'Prioritized search: Forskrift best result (Lov had no results)');
           }
         }
         
         // Track the best result so far (before checking remaining types)
         if (!foundEnoughResults && !bestResult) {
-          // Initialize bestResult with the better of Lov or Forskrift
-          if (forskriftHitCount >= lovHitCount) {
-            bestResult = forskriftResult;
-          } else {
-            bestResult = lovResult;
+          // Initialize bestResult - prioritize Lov (priority 1) over Forskrift
+          if (lovHitCount > 0) {
+            bestResult = lovResult; // Always prefer Lov if it has any results
+          } else if (forskriftHitCount > 0) {
+            bestResult = forskriftResult; // Only use Forskrift if Lov has no results
           }
           
           // If neither gave enough results, try remaining types sequentially
@@ -241,14 +268,30 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
             searchedTypes.push(lawType);
             
             // Track the best result so far
+            // Always prioritize Lov (priority 1) - only replace Lov with another Lov that has more hits
             const typeHitCount = typeResult.hits?.length ?? 0;
             if (!bestResult) {
               bestResult = typeResult;
             } else {
               const bestHitCount = bestResult.hits?.length ?? 0;
-              if (typeHitCount > bestHitCount) {
+              
+              // Determine if current best result is from a Lov search
+              // We can't directly check the filter, but we can infer from the search order
+              // Lov was searched first, so if bestResult was set from the initial search and has hits,
+              // it's likely from Lov (unless Forskrift had more hits, which we now prevent)
+              const isCurrentBestLov = bestResult === lovResult || 
+                (bestResult !== forskriftResult && lovHitCount > 0);
+              
+              // Prioritize Lov: only replace Lov result with another Lov result that has more hits
+              // For other types, only replace if significantly better (2x more hits) AND current best is not Lov
+              if (lawType === 'Lov' && (!isCurrentBestLov || typeHitCount > bestHitCount)) {
+                // New result is Lov - prioritize it over non-Lov, or replace Lov with better Lov
+                bestResult = typeResult;
+              } else if (lawType !== 'Lov' && !isCurrentBestLov && typeHitCount > bestHitCount * 2) {
+                // Neither is Lov - only replace if new type has significantly more hits (2x)
                 bestResult = typeResult;
               }
+              // Otherwise keep current best (prioritizes Lov)
             }
             
             // If we got enough results, use this type
