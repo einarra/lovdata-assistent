@@ -806,95 +806,33 @@ async function updateLinksForHtmlContent(evidence: AgentEvidence[], services: Se
         return item;
       }
 
-      // Skip if already .html
-      if (member.toLowerCase().endsWith('.html')) {
-        return item;
+      // Always use HTML viewer URL from RAG system instead of extracting from XML
+      // This ensures links point to the current RAG system, not outdated lovdata.no URLs
+      // Convert .xml member to .html for the viewer URL
+      const htmlMember = member.toLowerCase().endsWith('.xml') 
+        ? member.replace(/\.xml$/i, '.html')
+        : member;
+      const updatedLink = buildXmlViewerUrl(filename, htmlMember);
+      
+      logger.debug({ 
+        filename, 
+        member, 
+        htmlMember,
+        updatedLink,
+        evidenceId: item.id 
+      }, 'updateLinksForHtmlContent: updated link to HTML viewer from RAG system');
+      
+      const updatedMetadata = { ...metadata };
+      if (member.toLowerCase().endsWith('.xml')) {
+        updatedMetadata.fileExtension = '.html';
+        updatedMetadata.member = htmlMember;
       }
-
-      try {
-        // Check if content is HTML with timeout
-        let fullText: string | null = null;
-
-        const fetchPromise = (async () => {
-          if (archiveStore) {
-            logger.debug({ filename, member }, 'updateLinksForHtmlContent: fetching from archive store');
-            return await archiveStore.getDocumentContentAsync(filename, member);
-          }
-          if (lovdataClient) {
-            logger.debug({ filename, member }, 'updateLinksForHtmlContent: fetching from lovdata client');
-            const result = await lovdataClient.extractXml(filename, member);
-            return result.text;
-          }
-          return null;
-        })();
-
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(() => {
-            reject(new Error(`Document fetch timed out after ${documentFetchTimeoutMs}ms for ${filename}/${member}`));
-          }, documentFetchTimeoutMs);
-        });
-
-        try {
-          fullText = await Promise.race([fetchPromise, timeoutPromise]);
-          logger.debug({ filename, member, hasText: !!fullText, textLength: fullText?.length ?? 0 }, 'updateLinksForHtmlContent: document fetched');
-        } catch (fetchError) {
-          logger.warn({
-            err: fetchError,
-            filename,
-            member,
-            evidenceId: item.id
-          }, 'updateLinksForHtmlContent: document fetch failed or timed out, skipping HTML check');
-          // Continue without updating the link if fetch fails
-          return item;
-        }
-
-        // Try to extract data-lovdata-URL from XML content first
-        if (fullText) {
-          const lovdataUrl = extractLovdataUrlFromXml(fullText);
-          if (lovdataUrl) {
-            logger.debug({ 
-              filename, 
-              member, 
-              lovdataUrl,
-              evidenceId: item.id 
-            }, 'updateLinksForHtmlContent: extracted data-lovdata-URL from XML');
-            return {
-              ...item,
-              link: lovdataUrl,
-              metadata: {
-                ...metadata,
-                lovdataUrl: lovdataUrl
-              }
-            };
-          }
-        }
-
-        if (fullText && isHtmlContent(fullText) && member.toLowerCase().endsWith('.xml')) {
-          // Update link to use .html extension - endpoint will handle the fallback to .xml
-          const htmlMember = member.replace(/\.xml$/i, '.html');
-          const updatedLink = buildXmlViewerUrl(filename, htmlMember);
-          const updatedMetadata = { ...metadata };
-          updatedMetadata.fileExtension = '.html';
-          updatedMetadata.member = htmlMember;
-
-          logger.debug({ filename, member, htmlMember }, 'updateLinksForHtmlContent: updated link to HTML');
-          return {
-            ...item,
-            link: updatedLink,
-            metadata: updatedMetadata
-          };
-        }
-      } catch (error) {
-        logger.warn({
-          err: error,
-          stack: error instanceof Error ? error.stack : undefined,
-          filename,
-          member,
-          evidenceId: item.id
-        }, 'updateLinksForHtmlContent: error updating link for HTML content');
-      }
-
-      return item;
+      
+      return {
+        ...item,
+        link: updatedLink,
+        metadata: updatedMetadata
+      };
     })
   );
 
@@ -1028,35 +966,27 @@ async function hydrateEvidenceContent(evidence: AgentEvidence[], services: Servi
           contentCache.set(cacheKey, truncateContent(fullText));
         }
 
-        // Try to extract data-lovdata-URL from XML content first
+        // Always use HTML viewer URL from RAG system instead of extracting from XML
+        // This ensures links point to the current RAG system, not outdated lovdata.no URLs
         const updatedMetadata = { ...metadata };
-        let updatedLink = item.link;
+        // Convert .xml member to .html for the viewer URL
+        const htmlMember = member.toLowerCase().endsWith('.xml') 
+          ? member.replace(/\.xml$/i, '.html')
+          : member;
+        const updatedLink = buildXmlViewerUrl(filename, htmlMember);
         
-        if (fullText) {
-          const lovdataUrl = extractLovdataUrlFromXml(fullText);
-          if (lovdataUrl) {
-            logger.debug({ 
-              filename, 
-              member, 
-              lovdataUrl,
-              evidenceId: item.id 
-            }, 'hydrateEvidenceContent: extracted data-lovdata-URL from XML');
-            updatedLink = lovdataUrl;
-            updatedMetadata.lovdataUrl = lovdataUrl;
-          }
-        }
-
-        // If content is HTML but member name ends in .xml, update link and metadata to reflect .html
-        // The endpoint will handle .html in the member parameter by falling back to .xml for fetching
-        // Only do this if we didn't find a data-lovdata-URL
-        if (fullText && isHtmlContent(fullText) && member.toLowerCase().endsWith('.xml') && !updatedMetadata.lovdataUrl) {
+        if (member.toLowerCase().endsWith('.xml')) {
           updatedMetadata.fileExtension = '.html';
-          // Update member name in metadata to show .html extension
-          const htmlMember = member.replace(/\.xml$/i, '.html');
           updatedMetadata.member = htmlMember;
-          // Update link to use .html extension - endpoint will handle the fallback to .xml
-          updatedLink = buildXmlViewerUrl(filename, htmlMember);
         }
+        
+        logger.debug({ 
+          filename, 
+          member, 
+          htmlMember,
+          updatedLink,
+          evidenceId: item.id 
+        }, 'hydrateEvidenceContent: updated link to HTML viewer from RAG system');
 
         return {
           ...item,
