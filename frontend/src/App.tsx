@@ -361,7 +361,10 @@ function App() {
         <header className="app-header">
           <div className="header-content">
             <div className="header-info">
-              <h1>LovSvar</h1>
+              <div className="header-title-wrapper">
+                <img src="/logo.jpeg" alt="ParagrafSvar logo" className="header-logo" />
+                <h1>ParagrafSvar</h1>
+              </div>
               <p>Velg et nytt passord for å fortsette.</p>
             </div>
           </div>
@@ -415,7 +418,10 @@ function App() {
         <header className="app-header">
           <div className="header-content">
             <div className="header-info">
-              <h1>LovSvar</h1>
+              <div className="header-title-wrapper">
+                <img src="/logo.jpeg" alt="ParagrafSvar logo" className="header-logo" />
+                <h1>ParagrafSvar</h1>
+              </div>
               <p>Logg inn med e-post for å chatte med norske juridiske data.</p>
             </div>
           </div>
@@ -494,7 +500,10 @@ function App() {
         <header className="app-header">
           <div className="header-content">
             <div className="header-info">
-              <h1>LovSvar</h1>
+              <div className="header-title-wrapper">
+                <img src="/logo.jpeg" alt="ParagrafSvar logo" className="header-logo" />
+                <h1>ParagrafSvar</h1>
+              </div>
               <p>Personvern og samtykke</p>
             </div>
           </div>
@@ -519,7 +528,10 @@ function App() {
                 setActiveView('chat');
               }}
             >
-              <h1>LovSvar</h1>
+              <div className="header-title-wrapper">
+                <img src="/logo.jpeg" alt="ParagrafSvar logo" className="header-logo" />
+                <h1>ParagrafSvar</h1>
+              </div>
             </a>
             <p>Chat med norske juridiske data fra Lovdata.no</p>
           </div>
@@ -532,7 +544,7 @@ function App() {
                 setActiveView((prev) => (prev === 'about' ? 'chat' : 'about'));
               }}
             >
-              Om LovSvar
+              Om ParagrafSvar
             </a>
             <a
               className={`header-nav-link ${activeView === 'contact' ? 'active' : ''}`}
@@ -545,7 +557,6 @@ function App() {
               Kontakt oss
             </a>
             <span className="header-user">
-              {session.user?.email ?? 'Innlogget bruker'}
               <button className="button-link" onClick={handleSignOut}>
                 Logg ut
               </button>

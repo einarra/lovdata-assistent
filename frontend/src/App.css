@@ -34,7 +34,7 @@ body {
 }
 
 .app-header {
-  background: #1a2332;
+  background: #0d4f4f;
   color: #ffffff;
   padding: 24px 32px;
   border-bottom: 1px solid #2d3748;
@@ -64,6 +64,18 @@ body {
 .header-title-link:hover h1,
 .header-title-link:focus-visible h1 {
   color: #e2e8f0;
+}
+
+.header-title-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.header-logo {
+  height: 32px;
+  width: 32px;
+  object-fit: contain;
 }
 
 .header-nav {
@@ -426,7 +438,7 @@ body {
 }
 
 .app-footer {
-  background: #1a2332;
+  background: #0d4f4f;
   border-top: 1px solid #2d3748;
   padding: 16px 24px;
   text-align: center;
