@@ -721,6 +721,7 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
         }, 'runAssistant: filtered evidence to match agent citations');
         
         // Sanitize answer text to fix malformed HTML links (e.g., extra closing parentheses)
+        // Also sanitize any plain URLs in the answer text that might have trailing characters
         const sanitizedAnswer = sanitizeAnswerLinks(agentOutput.answer ?? 'Jeg klarte ikke å generere et svar.');
         
         response = {
@@ -1430,6 +1431,9 @@ function sanitizeEvidenceLink(link: string | null | undefined): string | null {
 
   // Remove trailing periods and quotes that might be left over
   sanitized = sanitized.replace(/\s*\.\s*"?\s*$/g, '').replace(/\s*"\s*$/g, '');
+  
+  // Remove any trailing whitespace, periods, commas, or other punctuation that might have been accidentally included
+  sanitized = sanitized.replace(/[\s.,;:!?]+$/g, '');
 
   if (sanitized !== link) {
     logger.debug({ original: link, sanitized }, 'sanitizeEvidenceLink: cleaned evidence link');
@@ -1494,12 +1498,38 @@ function sanitizeAnswerLinks(answer: string): string {
     return match;
   });
 
+  // Fix plain URLs in the answer text that might have trailing characters
+  // This handles cases where URLs are displayed as plain text (not in HTML tags)
+  // The frontend regex will match these URLs, so we need to clean trailing punctuation
+  // Pattern: http://... or https://... followed by trailing punctuation before whitespace
+  sanitized = sanitized.replace(/(https?:\/\/[^\s<>"']+?)(\)\s*\.?\s*"?\s*)(?=\s|$|[<"'])/gi, (match, url, trailing) => {
+    // Only remove trailing ) and punctuation if the URL itself doesn't need them
+    // Check if URL has balanced parentheses
+    const openCount = (url.match(/\(/g) || []).length;
+    const closeCount = (url.match(/\)/g) || []).length;
+    // If trailing has ) and URL already has balanced or extra ), remove the trailing )
+    if (trailing.includes(')') && closeCount >= openCount) {
+      const fixed = url;
+      logger.debug({ original: match, fixed }, 'sanitizeAnswerLinks: removed trailing ) from plain URL');
+      return fixed;
+    }
+    return match;
+  });
+
+  // Also handle URLs with trailing periods, quotes, or other punctuation patterns like ")."
+  sanitized = sanitized.replace(/(https?:\/\/[^\s<>"']+?)(["'`\s]*\)\s*\.\s*["'`\s]*)(?=\s|$|[<"'])/gi, (match, url, trailing) => {
+    // Remove trailing ")." pattern (common formatting error)
+    const fixed = url;
+    logger.debug({ original: match, fixed }, 'sanitizeAnswerLinks: removed trailing ")." from plain URL');
+    return fixed;
+  });
+
   if (sanitized !== answer) {
     logger.info({ 
       originalLength: answer.length, 
       sanitizedLength: sanitized.length,
       changed: true
-    }, 'sanitizeAnswerLinks: sanitized answer text to remove extra closing parentheses from links');
+    }, 'sanitizeAnswerLinks: sanitized answer text to remove extra closing parentheses and trailing punctuation from links');
   }
 
   return sanitized;
