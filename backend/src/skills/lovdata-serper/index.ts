@@ -54,28 +54,89 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
   
   logger.info({ 
     query: input.query,
-    searchStrategy: 'lovdata.no with targetDocuments'
-  }, 'lovdata-serper: calling client.search on lovdata.no');
+    searchStrategy: 'lovdata.no and domstol.no with targetDocuments'
+  }, 'lovdata-serper: calling client.search on both sites');
   
-  let response;
+  let lovdataResponse: Awaited<ReturnType<typeof client.search>>;
+  let domstolResponse: Awaited<ReturnType<typeof client.search>>;
+  
   try {
-    // Search on lovdata.no with targetDocuments to get actual document links
+    // Search on both lovdata.no and domstol.no with targetDocuments to get actual document links
     // This ensures we get links to documents, not search/register pages
-    response = await client.search(input.query, {
-      num: input.num,
+    const searchOptions = {
+      num: input.num ? Math.ceil(input.num / 2) : 5, // Split the requested number between both sites
       gl: input.gl ?? 'no',
       hl: input.hl ?? 'no',
-      site: 'lovdata.no',
       targetDocuments: true // This will use inurl patterns to find document links
-    });
+    };
+    
+    // Perform both searches in parallel
+    const [lovdataResult, domstolResult] = await Promise.all([
+      client.search(input.query, {
+        ...searchOptions,
+        site: 'lovdata.no'
+      }),
+      client.search(input.query, {
+        ...searchOptions,
+        site: 'domstol.no'
+      })
+    ]);
+    
+    lovdataResponse = lovdataResult;
+    domstolResponse = domstolResult;
     
     logger.info({ 
-      hasOrganic: !!response.organic,
-      organicCount: Array.isArray(response.organic) ? response.organic.length : 0
-    }, 'lovdata-serper: client.search completed');
+      lovdataOrganicCount: Array.isArray(lovdataResponse.organic) ? lovdataResponse.organic.length : 0,
+      domstolOrganicCount: Array.isArray(domstolResponse.organic) ? domstolResponse.organic.length : 0
+    }, 'lovdata-serper: both searches completed');
     
-    // Prioritize document links in results
-    response = SerperClient.prioritizeDocumentLinks(response);
+    // Merge results from both sites
+    const mergedOrganic = [
+      ...(lovdataResponse.organic ?? []),
+      ...(domstolResponse.organic ?? [])
+    ];
+    
+    // Create merged response
+    const mergedResponse: Awaited<ReturnType<typeof client.search>> = {
+      ...lovdataResponse,
+      organic: mergedOrganic
+    };
+    
+    // Prioritize document links in merged results
+    const response = SerperClient.prioritizeDocumentLinks(mergedResponse);
+    
+    // Limit to requested number if specified
+    if (input.num && response.organic && response.organic.length > input.num) {
+      response.organic = response.organic.slice(0, input.num);
+    }
+    
+    logger.info({ 
+      totalOrganicCount: response.organic?.length ?? 0
+    }, 'lovdata-serper: results merged and prioritized');
+    
+    const organic = (response.organic ?? []).map(item => ({
+      title: item.title ?? null,
+      link: item.link ?? null,
+      snippet: item.snippet ?? null,
+      date: item.date ?? null,
+      isDocument: SerperClient.isDocumentLink(item.link) // Add flag to indicate if it's a document link
+    }));
+
+    logger.info({ 
+      organicCount: organic.length
+    }, 'lovdata-serper: processing results');
+
+    return {
+      result: {
+        query: input.query,
+        organic
+      },
+      meta: {
+        skill: 'lovdata-serper',
+        action: 'search',
+        totalOrganicResults: organic.length
+      }
+    };
   } catch (searchError) {
     logger.error({ 
       err: searchError,
@@ -83,30 +144,6 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
     }, 'lovdata-serper: client.search failed');
     throw searchError;
   }
-
-  const organic = (response.organic ?? []).map(item => ({
-    title: item.title ?? null,
-    link: item.link ?? null,
-    snippet: item.snippet ?? null,
-    date: item.date ?? null,
-    isDocument: SerperClient.isDocumentLink(item.link) // Add flag to indicate if it's a document link
-  }));
-
-  logger.info({ 
-    organicCount: organic.length
-  }, 'lovdata-serper: processing results');
-
-  return {
-    result: {
-      query: input.query,
-      organic
-    },
-    meta: {
-      skill: 'lovdata-serper',
-      action: 'search',
-      totalOrganicResults: organic.length
-    }
-  };
 }
 
 function normalizeInput(input: unknown): SerperSkillInput {

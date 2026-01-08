@@ -21,12 +21,13 @@ export const LOVDATA_API_MANIFEST: Manifest = {
 export const LOVDATA_SERPER_MANIFEST: Manifest = {
   name: 'lovdata-serper',
   version: '1.0.0',
-  summary: 'Perform targeted web searches on Lovdata.no via Serper.',
-  description: 'Uses the Serper API to browse Lovdata.no, returning curated organic results and snippets.',
-  tags: ['lovdata', 'search', 'serper'],
+  summary: 'Perform targeted web searches on Lovdata.no and Domstol.no via Serper.',
+  description: 'Uses the Serper API to browse Lovdata.no and Domstol.no, returning curated organic results and snippets from both legal domains.',
+  tags: ['lovdata', 'domstol', 'search', 'serper'],
   matchers: [
     { includes: ['search', 'lovdata'], weight: 0.95 },
     { includes: ['browse', 'lovdata'], weight: 0.9 },
+    { includes: ['search', 'domstol'], weight: 0.95 },
     { includes: ['serper'], weight: 0.85 },
     { includes: [], weight: 0.55 }
   ],

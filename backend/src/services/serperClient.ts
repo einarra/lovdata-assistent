@@ -40,7 +40,8 @@ export class SerperClient {
       const normalizedSite = options.site.replace(/^https?:\/\//, '').replace(/\/$/, '');
       
       if (options.targetDocuments) {
-        // Target common Lovdata document URL patterns:
+        // Target common document URL patterns for both lovdata.no and domstol.no:
+        // Lovdata patterns:
         // - /dokument/ (document pages)
         // - /lov/ (laws)
         // - /forskrift/ (regulations)
@@ -55,8 +56,13 @@ export class SerperClient {
         // - /tariffavtaler/ (collective agreements)
         // - /husleietvistutvalget/ (rent dispute committee)
         // - /sph2025/ (State Personnel Handbook 2025)
+        // Domstol.no patterns:
+        // - /dom/ (judgments)
+        // - /avgjorelse/ (decisions)
+        // - /rettsavgjorelse/ (court decisions)
+        // - /sak/ (cases)
         // Exclude /register/ to avoid search pages
-        siteQuery = `site:${normalizedSite} (inurl:/dokument/ OR inurl:/lover/ OR inurl:/lov/ OR inurl:/forskrifter/ OR inurl:/forskrift/ OR inurl:/avgjørelser/ OR inurl:/avgjorelse/ OR inurl:/rundskriv/ OR inurl:/vedtak/ OR inurl:/lokaleForskrifter/ OR inurl:/lovtidend/ OR inurl:/eosavtalen/ OR inurl:/traktater/ OR inurl:/trygderetten/ OR inurl:/tariffavtaler/ OR inurl:/husleietvistutvalget/ OR inurl:/sph2025/) -inurl:/register/ `;
+        siteQuery = `site:${normalizedSite} (inurl:/dokument/ OR inurl:/lover/ OR inurl:/lov/ OR inurl:/forskrifter/ OR inurl:/forskrift/ OR inurl:/avgjørelser/ OR inurl:/avgjorelse/ OR inurl:/rundskriv/ OR inurl:/vedtak/ OR inurl:/lokaleForskrifter/ OR inurl:/lovtidend/ OR inurl:/eosavtalen/ OR inurl:/traktater/ OR inurl:/trygderetten/ OR inurl:/tariffavtaler/ OR inurl:/husleietvistutvalget/ OR inurl:/sph2025/ OR inurl:/dom/ OR inurl:/rettsavgjorelse/ OR inurl:/sak/) -inurl:/register/ `;
       } else {
         siteQuery = `site:${normalizedSite} `;
       }
@@ -184,7 +190,7 @@ export class SerperClient {
   }
 
   /**
-   * Check if a URL is a direct document link on Lovdata.no
+   * Check if a URL is a direct document link on lovdata.no or domstol.no
    * Excludes register pages, search pages, and other non-document pages
    */
   static isDocumentLink(url: string | null | undefined): boolean {
@@ -207,8 +213,9 @@ export class SerperClient {
       return false;
     }
     
-    // Include document patterns
+    // Include document patterns for both lovdata.no and domstol.no
     const documentPatterns = [
+      // Lovdata patterns
       /\/dokument\//,
       /\/lov\//,
       /\/forskrift\//,
@@ -225,6 +232,10 @@ export class SerperClient {
       /\/tariffavtaler\//,
       /\/husleietvistutvalget\//,
       /\/sph2025\//,
+      // Domstol.no patterns
+      /\/dom\//,
+      /\/rettsavgjorelse\//,
+      /\/sak\//,
     ];
     return documentPatterns.some(pattern => pattern.test(url));
   }
