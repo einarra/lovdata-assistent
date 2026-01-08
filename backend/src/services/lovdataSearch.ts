@@ -93,8 +93,42 @@ export async function searchLovdataPublicData(options: {
 
   let finalHits = result.hits;
 
+  // Boost base laws over amendment laws
+  // Amendment laws typically have titles like "Lov om endring i..." or "Lov om endringer i..."
+  // Base laws are the actual laws themselves (e.g., "Lov 4. juli 1991 nr. 47 om ekteskap")
+  const isAmendmentLaw = (title: string | null): boolean => {
+    if (!title) return false;
+    const titleLower = title.toLowerCase();
+    return titleLower.includes('endring') || 
+           titleLower.includes('endringer') ||
+           titleLower.includes('ikraftsetting') ||
+           titleLower.includes('delegering') ||
+           titleLower.includes('overføring');
+  };
+
+  const boostBaseLaws = (hits: typeof result.hits): typeof result.hits => {
+    // Separate base laws and amendment laws
+    const baseLaws: typeof result.hits = [];
+    const amendmentLaws: typeof result.hits = [];
+    
+    for (const hit of hits) {
+      if (isAmendmentLaw(hit.title)) {
+        amendmentLaws.push(hit);
+      } else {
+        baseLaws.push(hit);
+      }
+    }
+    
+    // Return base laws first, then amendment laws
+    // This ensures the actual law appears before laws that change it
+    return [...baseLaws, ...amendmentLaws];
+  };
+
+  // Apply base law boosting before re-ranking
+  finalHits = boostBaseLaws(result.hits);
+
   // Re-rank results if enabled and we have candidates
-  if (enableReranking && result.hits.length > 0) {
+  if (enableReranking && finalHits.length > 0) {
     try {
       const rerankTimer = new Timer('rerank_results', logger, {
         query: query.substring(0, 100),
@@ -105,14 +139,16 @@ export async function searchLovdataPublicData(options: {
       const rerankService = new RerankService({ logger });
       
       // Prepare candidates for re-ranking
-      const candidates: RerankCandidate[] = result.hits.map((hit, idx) => ({
+      // Use finalHits (with base law boosting) instead of result.hits
+      const candidates: RerankCandidate[] = finalHits.map((hit, idx) => ({
         text: `${hit.title || ''} ${hit.snippet}`.trim(),
         metadata: {
           filename: hit.filename,
           member: hit.member,
           title: hit.title,
           date: hit.date,
-          snippet: hit.snippet
+          snippet: hit.snippet,
+          isBaseLaw: !isAmendmentLaw(hit.title) // Add flag for base law
         },
         index: idx
       }));
@@ -124,12 +160,29 @@ export async function searchLovdataPublicData(options: {
       rerankTimer.end({ rerankedCount: rerankedResults.length });
 
       // Map re-ranked results back to hits
+      // Use finalHits (with base law boosting) instead of result.hits
       const rerankedHits = rerankedResults
-        .map(reranked => result.hits[reranked.index])
+        .map(reranked => finalHits[reranked.index])
         .filter(hit => hit !== undefined);
       
-      // Apply pagination to re-ranked results
-      finalHits = rerankedHits.slice(offset, offset + pageSize);
+      // Apply additional boost to base laws after re-ranking
+      // This ensures base laws stay at the top even after semantic re-ranking
+      const baseLawsAfterRerank: typeof rerankedHits = [];
+      const amendmentLawsAfterRerank: typeof rerankedHits = [];
+      
+      for (const hit of rerankedHits) {
+        if (isAmendmentLaw(hit.title)) {
+          amendmentLawsAfterRerank.push(hit);
+        } else {
+          baseLawsAfterRerank.push(hit);
+        }
+      }
+      
+      // Combine: base laws first (preserving rerank order), then amendment laws (preserving rerank order)
+      finalHits = [...baseLawsAfterRerank, ...amendmentLawsAfterRerank];
+      
+      // Apply pagination to final results
+      finalHits = finalHits.slice(offset, offset + pageSize);
 
       logger.info({
         originalCount: result.hits.length,
