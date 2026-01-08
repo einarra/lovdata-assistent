@@ -188,12 +188,19 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
                 hasNewLovdataSearch
               }, 'runAssistant: agent requested function calls');
               
-              // If agent is refining the search, clear pending evidence from previous searches
+              // If agent is refining the search, remove evidence from previous lovdata searches
+              // Keep serper evidence as it's from a different source
               if (hasNewLovdataSearch) {
+                const beforeCount = agentEvidence.length;
+                // Remove only lovdata evidence, keep serper and other evidence
+                agentEvidence = agentEvidence.filter(e => e.source !== 'lovdata');
+                const removedCount = beforeCount - agentEvidence.length;
                 logger.info({
+                  removedCount,
+                  remainingCount: agentEvidence.length,
                   clearedPendingCount: Array.from(pendingEvidenceMap.values()).flat().length,
-                  message: 'Agent refining search - clearing pending evidence from previous search'
-                }, 'runAssistant: clearing pending evidence due to search refinement');
+                  message: 'Agent refining search - removed previous lovdata evidence, keeping serper evidence'
+                }, 'runAssistant: removed previous lovdata evidence due to search refinement');
                 pendingEvidenceMap.clear();
               }
               
@@ -280,7 +287,7 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
                       } : null
                     }, 'runAssistant: evidence conversion result');
                     
-                    // DON'T add evidence to agentEvidence yet - let agent evaluate first
+                    // Add evidence immediately to ensure it's available in the response
                     // Deduplicate evidence by (filename, member) to avoid duplicates
                     const existingKeys = new Set(agentEvidence.map(e => `${e.metadata?.filename}:${e.metadata?.member}`));
                     const uniqueNewEvidence = newEvidence.filter(e => {
@@ -291,6 +298,9 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
                       existingKeys.add(key);
                       return true;
                     });
+                    
+                    // Add evidence immediately - it will be removed if agent refines the search
+                    agentEvidence = [...agentEvidence, ...uniqueNewEvidence];
                     
                     // Format function result with evaluation guidance for agent
                     // Include ALL results (not just samples) so agent can evaluate properly
@@ -318,26 +328,19 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
                     };
                     
                     // Add to function results for next iteration - agent will evaluate
-                    // Evidence will NOT be added to agentEvidence until agent confirms they are relevant
                     functionResults.push({
                       name: functionCall.name,
                       result: formattedResult,
                       toolCallId: functionCall.toolCallId
                     });
                     
-                    // Store pending evidence that can be added if agent confirms relevance
-                    // We'll add it in the next iteration if agent doesn't refine the search
-                    const pendingEvidenceKey = `pending_${functionCall.toolCallId}`;
-                    pendingEvidenceMap.set(pendingEvidenceKey, uniqueNewEvidence);
-                    
                     logger.info({
                       hitsCount: lovdataResult.hits?.length ?? 0,
                       newEvidenceCount: newEvidence.length,
                       uniqueEvidenceCount: uniqueNewEvidence.length,
-                      pendingEvidenceKey,
-                      pendingEvidenceMapSize: pendingEvidenceMap.size,
-                      message: 'Evidence NOT added yet - waiting for agent evaluation. Agent must evaluate results and either refine search or confirm relevance by not searching again.'
-                    }, 'runAssistant: lovdata-api search completed - waiting for agent evaluation');
+                      totalEvidenceCount: agentEvidence.length,
+                      message: 'Evidence added immediately - will be removed if agent refines search'
+                    }, 'runAssistant: lovdata-api search completed - evidence added');
                     
                   } else if (functionCall.name === 'search_lovdata_legal_practice') {
                     // Execute lovdata-serper skill
@@ -501,6 +504,20 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
         }
       }
       
+      // Final safety check: ensure all pending evidence is added before building response
+      // This handles cases where evidence might not have been added during the loop
+      if (pendingEvidenceMap.size > 0) {
+        logger.info({
+          pendingEvidenceCount: Array.from(pendingEvidenceMap.values()).flat().length,
+          message: 'Final safety check - adding any remaining pending evidence'
+        }, 'runAssistant: adding remaining pending evidence before response');
+        
+        for (const [key, evidence] of pendingEvidenceMap.entries()) {
+          agentEvidence = [...agentEvidence, ...evidence];
+        }
+        pendingEvidenceMap.clear();
+      }
+      
       // Build result structure for compatibility with existing code
       const result: LovdataSkillSearchResult = {
         hits: [],
@@ -589,11 +606,10 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
         const citedEvidenceIds = new Set(normalizedCitations.map(c => c.evidenceId));
         const filteredEvidence = evidenceWithUpdatedLinks.filter(e => citedEvidenceIds.has(e.id));
         
-        // If agent provided citations, only include cited evidence
-        // If agent didn't provide citations, include all evidence (fallback behavior)
-        const finalEvidence = agentOutput.citations && agentOutput.citations.length > 0
-          ? filteredEvidence
-          : evidenceWithUpdatedLinks;
+        // Include all evidence in the response, not just cited evidence
+        // This ensures users can see all documents that were found, even if not explicitly cited
+        // The agent can still cite specific evidence in the answer, but all evidence is available
+        const finalEvidence = evidenceWithUpdatedLinks;
         
         // Re-normalize citations with filtered evidence to ensure correct numbering
         const finalCitations = normaliseCitations(agentOutput.citations ?? [], finalEvidence, pagination);
