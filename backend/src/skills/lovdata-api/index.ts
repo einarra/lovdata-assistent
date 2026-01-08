@@ -4,6 +4,7 @@ import { searchLovdataPublicData, type LovdataSearchResult } from '../../service
 import type { SupabaseArchiveStore } from '../../storage/supabaseArchiveStore.js';
 import { EmbeddingService } from '../../services/embeddingService.js';
 import { logger } from '../../logger.js';
+import { env } from '../../config/env.js';
 
 type LovdataSkillInput =
   | { action: 'listPublicData' }
@@ -78,13 +79,20 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
 
       // Generate query embedding once to reuse across all searches (OPTIMIZATION)
       // This enables hybrid search (vector + keyword) for better search quality
+      // Enhance query with context to improve embedding quality and search relevance
       let queryEmbedding: number[] | null = null;
       try {
         // Access embedding service from archive store if available
         const embeddingService = (archiveStore as any).embeddingService as EmbeddingService | null;
         if (embeddingService) {
-          queryEmbedding = await embeddingService.generateEmbedding(command.query);
-          logger.debug({ queryLength: command.query.length }, 'Generated query embedding for search');
+          // Enhance query with context to improve embedding quality
+          // This helps the vector search better understand intent and reduce false positives
+          const enhancedQuery = enhanceQueryForEmbedding(command.query, command.filters);
+          queryEmbedding = await embeddingService.generateEmbedding(enhancedQuery);
+          logger.debug({ 
+            queryLength: command.query.length,
+            enhancedQueryLength: enhancedQuery.length 
+          }, 'Generated query embedding for search with enhanced context');
         }
       } catch (embeddingError) {
         logger.warn({ err: embeddingError }, 'Failed to generate query embedding - will fall back to FTS-only search');
@@ -106,30 +114,34 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
         
         // OPTIMIZATION: Search Lov + Forskrift in parallel (Option C)
         // These are the two highest priority types, so search them together
+        // Enable reranking for better result quality
+        const enableReranking = env.ENABLE_RERANKING;
         const [lovResult, forskriftResult] = await Promise.all([
           searchLovdataPublicData({
             store: archiveStore,
             query: command.query,
             page,
             pageSize,
-            enableReranking: false,
+            enableReranking, // Enable reranking for better quality
             filters: {
               ...command.filters,
               lawType: 'Lov'
             },
-            queryEmbedding // Reuse pre-computed embedding
+            queryEmbedding, // Reuse pre-computed embedding
+            rrfK: env.RRF_K // Use configured RRF k parameter
           }),
           searchLovdataPublicData({
             store: archiveStore,
             query: command.query,
             page,
             pageSize,
-            enableReranking: false,
+            enableReranking, // Enable reranking for better quality
             filters: {
               ...command.filters,
               lawType: 'Forskrift'
             },
-            queryEmbedding // Reuse pre-computed embedding
+            queryEmbedding, // Reuse pre-computed embedding
+            rrfK: env.RRF_K // Use configured RRF k parameter
           })
         ]);
         
@@ -168,12 +180,13 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
               query: command.query,
               page,
               pageSize,
-              enableReranking: false,
+              enableReranking, // Enable reranking for better quality
               filters: {
                 ...command.filters,
                 lawType
               },
-              queryEmbedding // Reuse pre-computed embedding
+              queryEmbedding, // Reuse pre-computed embedding
+              rrfK: env.RRF_K // Use configured RRF k parameter
             });
             
             searchedTypes.push(lawType);
@@ -211,24 +224,29 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
               query: command.query,
               page,
               pageSize,
-              enableReranking: false,
+              enableReranking, // Enable reranking for better quality
               filters: {
                 ...command.filters,
                 lawType: undefined // Remove lawType filter
               },
-              queryEmbedding // Reuse pre-computed embedding
+              queryEmbedding, // Reuse pre-computed embedding
+              rrfK: env.RRF_K // Use configured RRF k parameter
             });
           }
         }
       } else {
         // Law type specified, use normal search with embedding for hybrid search
+        // Enable reranking for better result quality
+        const enableReranking = env.ENABLE_RERANKING;
         searchResult = await searchLovdataPublicData({
           store: archiveStore,
           query: command.query,
           page,
           pageSize,
+          enableReranking, // Enable reranking for better quality
           filters: command.filters,
-          queryEmbedding // Use pre-computed embedding for hybrid search
+          queryEmbedding, // Use pre-computed embedding for hybrid search
+          rrfK: env.RRF_K // Use configured RRF k parameter
         });
       }
       
@@ -347,6 +365,41 @@ function normalizeInput(input: unknown): LovdataSkillInput {
   }
 
   throw new Error('Unsupported Lovdata skill input shape');
+}
+
+/**
+ * Enhances query text for embedding generation to improve relevance.
+ * Adds context about what we're looking for to reduce false positives.
+ * @param query - Original search query
+ * @param filters - Optional filters (lawType, year, ministry)
+ * @returns Enhanced query text
+ */
+function enhanceQueryForEmbedding(
+  query: string,
+  filters?: { lawType?: string | null; year?: number | null; ministry?: string | null }
+): string {
+  const parts: string[] = [];
+  
+  // Add context about what we're searching for
+  parts.push('Søk etter juridiske dokumenter om:');
+  parts.push(query);
+  
+  // Add filter context if available to narrow down search
+  if (filters?.lawType) {
+    parts.push(`Dokumenttype: ${filters.lawType}`);
+  }
+  if (filters?.year) {
+    parts.push(`År: ${filters.year}`);
+  }
+  if (filters?.ministry) {
+    parts.push(`Departement: ${filters.ministry}`);
+  }
+  
+  // Add instruction to exclude irrelevant laws
+  // This helps the embedding model understand we want specific, relevant results
+  parts.push('Finn relevante dokumenter som direkte svarer på spørsmålet.');
+  
+  return parts.join('\n');
 }
 
 /**

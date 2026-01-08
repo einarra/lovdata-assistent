@@ -1111,7 +1111,9 @@ function buildEvidence(result: LovdataSkillSearchResult): AgentEvidence[] {
       title: hit.title ?? hit.filename ?? 'Uten tittel',
       snippet: hit.snippet,
       date: hit.date ?? null,
-      link: buildXmlViewerUrl(hit.filename, hit.member),
+      // Use URL from search result if available, otherwise build it
+      // The URL will be updated to actual lovdata.no URL from XML in updateLinksForHtmlContent
+      link: hit.url ?? buildXmlViewerUrl(hit.filename, hit.member),
       metadata: {
         filename: hit.filename,
         member: hit.member
@@ -1182,6 +1184,7 @@ function convertLovdataSkillResultsToEvidence(hits: Array<{
   title?: string | null;
   date?: string | null;
   snippet: string;
+  url?: string | null; // Web link to document (optional, will be built if missing)
 }>): AgentEvidence[] {
   return hits.map((hit, index) => ({
     id: `lovdata-${index + 1}`,
@@ -1189,7 +1192,9 @@ function convertLovdataSkillResultsToEvidence(hits: Array<{
     title: hit.title ?? hit.filename ?? 'Uten tittel',
     snippet: hit.snippet,
     date: hit.date ?? null,
-    link: buildXmlViewerUrl(hit.filename, hit.member),
+    // Use URL from search result if available, otherwise build it
+    // The URL will be updated to actual lovdata.no URL from XML in updateLinksForHtmlContent
+    link: hit.url ?? buildXmlViewerUrl(hit.filename, hit.member),
     metadata: {
       filename: hit.filename,
       member: hit.member

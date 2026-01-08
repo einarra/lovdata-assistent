@@ -11,6 +11,7 @@ export type LovdataArchiveHit = {
   title: string | null;
   date: string | null;
   snippet: string;
+  url: string | null; // Web link to the document (API viewer URL, can be updated to lovdata.no URL from XML)
 };
 
 export type LovdataSearchResult = {
@@ -161,13 +162,31 @@ export async function searchLovdataPublicData(options: {
     reranked: enableReranking && result.hits.length > 0
   });
 
+  // Build URLs for each hit using the API viewer endpoint
+  // These URLs can later be updated to actual lovdata.no URLs extracted from XML
+  const buildXmlViewerUrl = (filename: string | undefined, member: string | undefined): string | null => {
+    if (!filename || !member) {
+      return null;
+    }
+    try {
+      const url = new URL('/api/documents/xml', env.PUBLIC_API_BASE_URL);
+      url.searchParams.set('filename', filename);
+      url.searchParams.set('member', member);
+      return url.toString();
+    } catch (error) {
+      logger.error({ err: error, filename, member }, 'Failed to build XML viewer URL');
+      return null;
+    }
+  };
+
   return {
     hits: finalHits.map(hit => ({
       filename: hit.filename,
       member: hit.member,
       title: hit.title,
       date: hit.date,
-      snippet: hit.snippet
+      snippet: hit.snippet,
+      url: buildXmlViewerUrl(hit.filename, hit.member) // Include web link to document
     })),
     searchedFiles,
     totalHits: result.total,

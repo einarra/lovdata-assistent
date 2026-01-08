@@ -7,7 +7,7 @@ export const lovdataSearchFunction = {
   name: 'search_lovdata_legal_documents',
   description: `Søk gjennom Lovdata juridiske dokumenter. Bruk denne funksjonen for å finne lover, forskrifter, vedtak og andre juridiske dokumenter basert på brukerens spørsmål. 
   
-Prioritering av dokumenttyper (søk i denne rekkefølgen hvis brukerens spørsmål ikke spesifiserer type):
+Prioritering av lawType parameter: - (søk i denne rekkefølgen hvis brukerens spørsmål ikke spesifiserer type):
 1. Lov (lover/acts) - høyest prioritet
 2. Forskrift (regulations)
 3. Vedtak (decisions)
@@ -15,7 +15,7 @@ Prioritering av dokumenttyper (søk i denne rekkefølgen hvis brukerens spørsm�
 5. Reglement (regulations/regulations)
 6. Vedlegg (annexes) - lavest prioritet
 
-VIKTIG: Søk alltid gjennom dokumenttype Lov og Forskrift først. Hvis du ikke finner tilstrekkelige resultater med en dokumenttype, prøv neste type i prioritetsrekkefølgen.
+VIKTIG: Søk alltid gjennom lawType parameter: "Lov" og "Forskrift" først. Hvis du ikke finner tilstrekkelige resultater med en dokumenttype, prøv neste type i prioritetsrekkefølgen.
 
 VIKTIG: Når du får søkeresultater, evaluer dem først:
 - Sjekk om resultatene faktisk svarer på brukerens spørsmål basert på titler og utdrag
@@ -27,12 +27,12 @@ VIKTIG: Når du får søkeresultater, evaluer dem først:
     properties: {
       query: {
         type: 'string',
-        description: 'Søkeordene basert på brukerens spørsmål. Ekstraher relevante juridiske termer.'
+        description: 'Velg relevante søkeord basert på brukerens spørsmål. Ekstraher relevante juridiske termer.'
       },
       lawType: {
         type: 'string',
         enum: ['Lov', 'Forskrift', 'Vedtak', 'Instruks', 'Reglement', 'Vedlegg'],
-        description: 'Dokumenttype. Hvis ikke spesifisert i spørsmålet, start med "Lov" og "Forskrift" og prøv andre typer hvis nødvendig.'
+        description: 'lawType parameter. Hvis ikke spesifisert i spørsmålet, start med "Lov" og "Forskrift" og prøv andre typer hvis nødvendig.'
       },
       year: {
         type: 'number',
