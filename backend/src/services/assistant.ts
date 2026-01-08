@@ -683,6 +683,7 @@ type LovdataSkillSearchResult = {
     title?: string | null;
     date?: string | null;
     snippet: string;
+    url?: string | null; // Web link to the document (API viewer URL, can be updated to lovdata.no URL from XML)
   }>;
   searchedFiles?: string[];
   fallback?: {
