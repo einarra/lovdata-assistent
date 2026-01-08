@@ -91,18 +91,19 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
       } as const;
 
       // Prepare function definitions for the agent
+      // PRIORITY 1: lovdata-serper - primary search function
+      // PRIORITY 2: lovdata-api - secondary search for law changes and updates
       const functions = [
+        {
+          name: lovdataSerperFunction.name,
+          description: lovdataSerperFunction.description,
+          parameters: lovdataSerperFunction.parameters
+        },
         {
           name: lovdataSearchFunction.name,
           description: lovdataSearchFunction.description,
           parameters: lovdataSearchFunction.parameters
         }
-        // TEMPORARILY DISABLED: lovdata-serper to focus on lovdata-api search quality
-        // {
-        //   name: lovdataSerperFunction.name,
-        //   description: lovdataSerperFunction.description,
-        //   parameters: lovdataSerperFunction.parameters
-        // }
       ];
 
       logger.info('runAssistant: starting agent-driven function calling');
@@ -198,8 +199,11 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
                 hasNewLovdataSearch
               }, 'runAssistant: agent requested function calls');
               
-              // If agent is refining the search, remove evidence from previous lovdata searches
-              // Keep serper evidence as it's from a different source
+              // If agent is refining the search, handle evidence removal based on which search is being refined
+              // If refining serper search, remove previous serper evidence but keep lovdata evidence
+              // If refining lovdata search, remove previous lovdata evidence but keep serper evidence
+              const hasNewSerperSearch = agentResult.functionCalls.some(fc => fc.name === 'search_lovdata_legal_practice');
+              
               if (hasNewLovdataSearch) {
                 const beforeCount = agentEvidence.length;
                 // Remove only lovdata evidence, keep serper and other evidence
@@ -211,6 +215,18 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
                   clearedPendingCount: Array.from(pendingEvidenceMap.values()).flat().length,
                   message: 'Agent refining search - removed previous lovdata evidence, keeping serper evidence'
                 }, 'runAssistant: removed previous lovdata evidence due to search refinement');
+                pendingEvidenceMap.clear();
+              } else if (hasNewSerperSearch) {
+                const beforeCount = agentEvidence.length;
+                // Remove only serper evidence, keep lovdata and other evidence
+                agentEvidence = agentEvidence.filter(e => e.source !== 'serper');
+                const removedCount = beforeCount - agentEvidence.length;
+                logger.info({
+                  removedCount,
+                  remainingCount: agentEvidence.length,
+                  clearedPendingCount: Array.from(pendingEvidenceMap.values()).flat().length,
+                  message: 'Agent refining search - removed previous serper evidence, keeping lovdata evidence'
+                }, 'runAssistant: removed previous serper evidence due to search refinement');
                 pendingEvidenceMap.clear();
               }
               

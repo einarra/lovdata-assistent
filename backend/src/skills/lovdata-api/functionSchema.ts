@@ -5,17 +5,21 @@
 
 export const lovdataSearchFunction = {
   name: 'search_lovdata_legal_documents',
-  description: `Søk gjennom Lovdata juridiske dokumenter. Bruk denne funksjonen for å finne lover, forskrifter, vedtak og andre juridiske dokumenter basert på brukerens spørsmål. 
-  
-Prioritering av lawType parameter: - (søk i denne rekkefølgen hvis brukerens spørsmål ikke spesifiserer type):
+  description: `PRIORITET 2 - BRUK VED BEHOV: Søk gjennom Lovdata juridiske dokumenter fra offentlige data-arkiver. Bruk denne funksjonen sekundært når du trenger å undersøke lovendringer og oppdateringer.
+
+VIKTIG: Dette er din sekundære søkefunksjon. Bruk search_lovdata_legal_practice FØRST for alle spørsmål. Bruk denne funksjonen kun når du trenger:
+- Spesifikke lovendringer ("Lov om endring i...")
+- Oppdateringer til eksisterende lover
+- Detaljerte lovtekster fra offentlige data-arkiver
+- Sammenligning av forskjellige versjoner av en lov
+
+Prioritering av lawType parameter (søk i denne rekkefølgen hvis brukerens spørsmål ikke spesifiserer type):
 1. Lov (lover/acts) - høyest prioritet
 2. Forskrift (regulations)
 3. Vedtak (decisions)
 4. Instruks (instructions)
 5. Reglement (regulations/regulations)
 6. Vedlegg (annexes) - lavest prioritet
-
-VIKTIG: Søk alltid gjennom lawType parameter: "Lov" og "Forskrift" først. Hvis du ikke finner tilstrekkelige resultater med en dokumenttype, prøv neste type i prioritetsrekkefølgen.
 
 VIKTIG: Når du får søkeresultater, evaluer dem først:
 - Sjekk om resultatene faktisk svarer på brukerens spørsmål basert på titler og utdrag

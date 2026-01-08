@@ -5,16 +5,15 @@
 
 export const lovdataSerperFunction = {
   name: 'search_lovdata_legal_practice',
-  description: `Søk direkte på lovdata.no for å finne lover, sentrale forskrifter, artikler og kunngjøringer. 
+  description: `PRIORITET 1 - BRUK DETTE FØRST: Søk direkte på lovdata.no for å finne lover, sentrale forskrifter, artikler og kunngjøringer. 
 
-VIKTIG: Denne funksjonen gir deg direkte lenker til dokumenter på lovdata.no som automatisk inkluderes i evidence-listen. Alle lenker peker direkte til dokumentene, ikke søkesider.
-
+VIKTIG: Dette er din primære søkefunksjon - bruk denne FØRST for alle spørsmål. Denne funksjonen gir deg direkte lenker til dokumenter på lovdata.no som automatisk inkluderes i evidence-listen. Alle lenker peker direkte til dokumentene, ikke søkesider.
 
 SØKEMETODE:
 Denne funksjonen søker på hele lovdata.no og finner relevante dokumenter basert på søkeordene. Søket fokuserer på å finne direkte lenker til dokumenter (lover, forskrifter, rettsavgjørelser, kunngjøringer) og ekskluderer søkesider og register-sider.
 
 Bruk denne funksjonen for å finne:
-- Lover publisert på lovdata.no
+- Lover publisert på lovdata.no (inkludert base lover som ekteskapsloven)
 - Sentrale forskrifter publisert på lovdata.no
 - Kunngjøringer i Lovtidend
 - Artikler og eksempler på tolking og anvendelse av lovtekster
@@ -25,7 +24,7 @@ SØK PÅ NYTT VED BEHOV:
 - Hvis brukeren ber om mer informasjon, spesifikke eksempler, eller gir tilleggsinformasjon, kan du søke på nytt
 - Du kan søke flere ganger med ulike vinklinger eller mer spesifikke søkeord for å finne bedre resultater
 
-Bruk denne i kombinasjon med search_lovdata_legal_documents for å gi både lovtekster fra offentlige data og dokumenter fra lovdata.no. Dette gir deg både lovtekster og praktiske eksempler med direkte lenker til dokumentene.`,
+Hvis du trenger å undersøke lovendringer eller oppdateringer, kan du også bruke search_lovdata_legal_documents som sekundær søkefunksjon.`,
   parameters: {
     type: 'object',
     properties: {
