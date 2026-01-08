@@ -637,8 +637,11 @@ export class SupabaseArchiveStore {
         if (queryEmbedding && this.embeddingService) {
           // Use hybrid search on chunks with RRF (Reciprocal Rank Fusion)
           rpcFunctionName = 'search_document_chunks_hybrid';
+          // Pass the improved tsQuery instead of raw query
+          // The database function will still rebuild it, but at least we're passing the expanded query
+          // TODO: Modify database function to accept pre-built tsQuery parameter for better precision
           rpcParams = {
-            search_query: query,
+            search_query: expandedQuery, // Use expanded query with legal term expansions
             query_embedding: queryEmbedding,  // Pass as array directly
             result_limit: limit,
             result_offset: offset,

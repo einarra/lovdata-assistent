@@ -221,26 +221,17 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
                     // Execute lovdata-api skill
                     const searchParams = JSON.parse(functionCall.arguments);
                     
-                    // Apply default year filter: min 2021 (last 5 years) for Lov and Forskrift
-                    // unless user explicitly requested a different year
-                    const currentYear = new Date().getFullYear();
-                    const minYear = currentYear - 5; // 5 years back (2021 for 2026)
-                    let yearFilter = searchParams.year;
-                    
-                    // If searching for Lov or Forskrift and no year specified, use minYear
-                    if ((searchParams.lawType === 'Lov' || searchParams.lawType === 'Forskrift' || !searchParams.lawType) && !searchParams.year) {
-                      yearFilter = minYear;
-                      logger.info({
-                        lawType: searchParams.lawType,
-                        appliedYearFilter: yearFilter,
-                        reason: 'default_5_year_limit'
-                      }, 'runAssistant: applying default 5-year filter for Lov/Forskrift');
-                    }
+                    // REMOVED: Automatic year filter application
+                    // Year filter should ONLY be applied when explicitly requested by the user
+                    // Many relevant laws (like ekteskapsloven from 1991) are older than 5 years
+                    // Only use year filter if agent explicitly specified it
+                    const yearFilter = searchParams.year ?? null; // Use null (no filter) if not specified
                     
                     logger.info({ 
                       searchParams,
                       yearFilter,
-                      appliedYearFilter: yearFilter !== searchParams.year
+                      appliedYearFilter: false,
+                      message: yearFilter ? 'Year filter applied from agent request' : 'No year filter - searching all years'
                     }, 'runAssistant: executing lovdata-api search');
                     
                     const skillResult = await orchestrator.run(
@@ -250,7 +241,7 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
                           query: searchParams.query,
                           filters: {
                             lawType: searchParams.lawType,
-                            year: yearFilter,
+                            year: yearFilter, // null means no year filter
                             ministry: searchParams.ministry
                           },
                           page: searchParams.page || 1,

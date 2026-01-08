@@ -48,6 +48,7 @@ export function extractQueryTokens(queryLower: string): string[] {
  * Legal term expansions - maps common legal terms to related terms for better search
  */
 const LEGAL_TERM_EXPANSIONS: Record<string, string[]> = {
+  'ekteskap': ['ekteskapsloven', 'ekteskapsloven', 'ekteskapsrett', 'ekteskapsbrudd'],
   'skjevdeling': ['ekteskapsloven', 'ekteskapsbrudd', 'ekteskapsløsning', 'ekteskapsrett'],
   'ekteskapsløsning': ['ekteskapsloven', 'skjevdeling', 'ekteskapsbrudd'],
   'ekteskapsbrudd': ['ekteskapsloven', 'skjevdeling', 'ekteskapsløsning'],
