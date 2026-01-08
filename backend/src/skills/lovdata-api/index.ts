@@ -102,6 +102,25 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
       const usePrioritizedSearch = !command.filters?.lawType;
       const defaultLawTypePriority = ['Lov', 'Forskrift', 'Vedtak', 'Instruks', 'Reglement', 'Vedlegg'] as const;
       
+      // Log search strategy
+      logger.info({
+        query: command.query,
+        usePrioritizedSearch,
+        lawType: command.filters?.lawType,
+        year: command.filters?.year,
+        ministry: command.filters?.ministry,
+        pageSize,
+        message: usePrioritizedSearch 
+          ? 'Using prioritized search (no lawType specified)'
+          : `Using direct search with lawType: ${command.filters?.lawType}`
+      }, 'searchPublicData: search strategy');
+      
+      // Detect if query explicitly mentions a law type (e.g., "Forskrift til lov om...")
+      // This helps prioritize the correct type even when both return results
+      const queryLower = command.query.toLowerCase();
+      const mentionsForskrift = /\bforskrift\b/i.test(command.query);
+      const mentionsLov = /\blov\b/i.test(command.query) && !mentionsForskrift; // Only if not part of "forskrift til lov"
+      
       let searchResult: LovdataSearchResult | null = null;
       
       if (usePrioritizedSearch) {
@@ -119,7 +138,7 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
         const [lovResult, forskriftResult] = await Promise.all([
           searchLovdataPublicData({
             store: archiveStore,
-            query: command.query,
+            query: command.query, // Use original query for FTS (includes all terms)
             page,
             pageSize,
             enableReranking, // Enable reranking for better quality
@@ -127,12 +146,12 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
               ...command.filters,
               lawType: 'Lov'
             },
-            queryEmbedding, // Reuse pre-computed embedding
+            queryEmbedding, // Reuse pre-computed embedding (uses enhanced query with core terms)
             rrfK: env.RRF_K // Use configured RRF k parameter
           }),
           searchLovdataPublicData({
             store: archiveStore,
-            query: command.query,
+            query: command.query, // Use original query for FTS (includes all terms)
             page,
             pageSize,
             enableReranking, // Enable reranking for better quality
@@ -140,35 +159,65 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
               ...command.filters,
               lawType: 'Forskrift'
             },
-            queryEmbedding, // Reuse pre-computed embedding
+            queryEmbedding, // Reuse pre-computed embedding (uses enhanced query with core terms)
             rrfK: env.RRF_K // Use configured RRF k parameter
           })
         ]);
         
         searchedTypes.push('Lov', 'Forskrift');
         
-        // Check if Lov or Forskrift gave enough results
-        if (lovResult.hits && lovResult.hits.length >= minResults) {
-          searchResult = lovResult;
-          foundEnoughResults = true;
-        } else if (forskriftResult.hits && forskriftResult.hits.length >= minResults) {
+        const lovHitCount = lovResult.hits?.length ?? 0;
+        const forskriftHitCount = forskriftResult.hits?.length ?? 0;
+        
+        // Improved selection logic: prioritize based on query context and relevance
+        // If query mentions "forskrift", prioritize Forskrift results even if Lov has more hits
+        if (mentionsForskrift && forskriftHitCount > 0) {
+          // Query explicitly mentions "forskrift" - prioritize Forskrift results
           searchResult = forskriftResult;
-          foundEnoughResults = true;
+          foundEnoughResults = forskriftHitCount >= minResults;
+          logger.info({
+            query: command.query,
+            mentionsForskrift: true,
+            forskriftHits: forskriftHitCount,
+            lovHits: lovHitCount,
+            message: 'Query mentions "forskrift" - prioritizing Forskrift results'
+          }, 'Prioritized search: query mentions forskrift');
+        } else if (mentionsLov && lovHitCount > 0) {
+          // Query explicitly mentions "lov" (and not "forskrift") - prioritize Lov results
+          searchResult = lovResult;
+          foundEnoughResults = lovHitCount >= minResults;
+          logger.info({
+            query: command.query,
+            mentionsLov: true,
+            lovHits: lovHitCount,
+            forskriftHits: forskriftHitCount,
+            message: 'Query mentions "lov" - prioritizing Lov results'
+          }, 'Prioritized search: query mentions lov');
+        } else {
+          // No explicit mention - use standard logic: prefer type with more results
+          if (lovHitCount >= minResults) {
+            searchResult = lovResult;
+            foundEnoughResults = true;
+          } else if (forskriftHitCount >= minResults) {
+            searchResult = forskriftResult;
+            foundEnoughResults = true;
+          } else {
+            // Neither has enough results - choose the one with more hits
+            if (forskriftHitCount >= lovHitCount) {
+              bestResult = forskriftResult;
+            } else {
+              bestResult = lovResult;
+            }
+          }
         }
         
         // Track the best result so far (before checking remaining types)
-        if (!foundEnoughResults) {
-          const lovHitCount = lovResult.hits?.length ?? 0;
-          const forskriftHitCount = forskriftResult.hits?.length ?? 0;
-          
+        if (!foundEnoughResults && !bestResult) {
           // Initialize bestResult with the better of Lov or Forskrift
-          if (lovHitCount >= forskriftHitCount) {
-            bestResult = lovResult;
-            if (forskriftHitCount > lovHitCount) {
-              bestResult = forskriftResult;
-            }
-          } else {
+          if (forskriftHitCount >= lovHitCount) {
             bestResult = forskriftResult;
+          } else {
+            bestResult = lovResult;
           }
           
           // If neither gave enough results, try remaining types sequentially
@@ -216,9 +265,20 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
           if (bestResult && bestResult.hits && bestResult.hits.length > 0) {
             // Use the best result we found (even if it didn't meet minResults threshold)
             searchResult = bestResult;
+            logger.info({
+              query: command.query,
+              bestResultHits: bestResult.hits.length,
+              searchedTypes,
+              message: 'Using best result from searched types'
+            }, 'Prioritized search: using best result');
           } else {
             // No results found with any law type filter - try without filter
             // This handles the case where law_type might not be set in the database
+            logger.info({
+              query: command.query,
+              searchedTypes,
+              message: 'No results with law type filters - trying without filter'
+            }, 'Prioritized search: falling back to unfiltered search');
             searchResult = await searchLovdataPublicData({
               store: archiveStore,
               query: command.query,
@@ -259,6 +319,21 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
       const searchedFiles = searchResult.searchedFiles ?? [];
       const totalHits = searchResult.totalHits ?? 0;
       const totalPages = searchResult.totalPages ?? Math.max(1, Math.ceil(totalHits / pageSize));
+
+      // Log search results for debugging
+      logger.info({
+        query: command.query,
+        hitsCount: hits.length,
+        totalHits,
+        page,
+        pageSize,
+        totalPages,
+        lawType: command.filters?.lawType,
+        sampleTitles: hits.slice(0, 3).map(h => h.title),
+        message: hits.length === 0 
+          ? 'WARNING: No search results found'
+          : `Found ${hits.length} results (${totalHits} total)`
+      }, 'searchPublicData: search completed');
 
       // Serper fallback removed - agent will call serper directly when needed
 
@@ -352,6 +427,16 @@ function normalizeInput(input: unknown): LovdataSkillInput {
       const query = candidate.query.trim();
       // Infer filters from query if not explicitly provided
       const inferredFilters = candidate.filters ?? inferFiltersFromQuery(query);
+      
+      // Log inferred filters for debugging
+      if (inferredFilters.lawType || inferredFilters.year || inferredFilters.ministry) {
+        logger.debug({
+          query,
+          inferredFilters,
+          message: 'Inferred filters from query'
+        }, 'normalizeInput: inferred filters');
+      }
+      
       return {
         action: 'searchPublicData',
         query,
@@ -374,15 +459,37 @@ function normalizeInput(input: unknown): LovdataSkillInput {
  * @param filters - Optional filters (lawType, year, ministry)
  * @returns Enhanced query text
  */
+/**
+ * Extracts core search terms from queries that mention law types.
+ * For example: "Forskrift til lov om register over reelle rettighetshavere"
+ * Should extract: "register over reelle rettighetshavere" as the core terms
+ */
+function extractCoreSearchTerms(query: string): string {
+  // Remove common law type prefixes that don't help with search
+  // Patterns like "Forskrift til lov om...", "Lov om...", etc.
+  const cleaned = query
+    .replace(/^(?:forskrift\s+til\s+)?(?:lov\s+om\s+)/i, '') // "Forskrift til lov om..." or "Lov om..."
+    .replace(/^forskrift\s+til\s+/i, '') // "Forskrift til..."
+    .replace(/^lov\s+om\s+/i, '') // "Lov om..."
+    .replace(/^forskrift\s+om\s+/i, '') // "Forskrift om..."
+    .trim();
+  
+  // If cleaning removed everything, use original query
+  return cleaned.length > 0 ? cleaned : query;
+}
+
 function enhanceQueryForEmbedding(
   query: string,
   filters?: { lawType?: string | null; year?: number | null; ministry?: string | null }
 ): string {
   const parts: string[] = [];
   
+  // Extract core search terms (remove law type prefixes)
+  const coreTerms = extractCoreSearchTerms(query);
+  
   // Add context about what we're searching for
   parts.push('Søk etter juridiske dokumenter om:');
-  parts.push(query);
+  parts.push(coreTerms); // Use core terms instead of full query
   
   // Add filter context if available to narrow down search
   if (filters?.lawType) {
@@ -437,21 +544,27 @@ function inferFiltersFromQuery(query: string): {
     }
   }
 
-  // Extract law type
-  const lawTypePatterns = [
-    { pattern: /\b(lov|act)\b/i, type: 'Lov' },
-    { pattern: /\b(forskrift|regulation)\b/i, type: 'Forskrift' },
-    { pattern: /\b(vedtak|decision)\b/i, type: 'Vedtak' },
-    { pattern: /\b(cirkulær|circular)\b/i, type: 'Cirkulær' },
-    { pattern: /\b(rundskriv|circular letter)\b/i, type: 'Rundskriv' },
-    { pattern: /\b(instruks|instruction)\b/i, type: 'Instruks' },
-    { pattern: /\b(reglement|regulations)\b/i, type: 'Reglement' }
-  ];
+  // Extract law type - prioritize "forskrift til lov" patterns
+  // Check for "forskrift til lov" first (most specific pattern)
+  if (/\bforskrift\s+til\s+lov\b/i.test(query) || /\bforskrift\s+til\s+.*lov\b/i.test(query)) {
+    filters.lawType = 'Forskrift';
+  } else {
+    // Check other law type patterns
+    const lawTypePatterns = [
+      { pattern: /\bforskrift\b/i, type: 'Forskrift' }, // Check forskrift before lov to catch "forskrift" mentions
+      { pattern: /\blov\b/i, type: 'Lov' }, // But not if it's part of "forskrift til lov"
+      { pattern: /\b(vedtak|decision)\b/i, type: 'Vedtak' },
+      { pattern: /\b(cirkulær|circular)\b/i, type: 'Cirkulær' },
+      { pattern: /\b(rundskriv|circular letter)\b/i, type: 'Rundskriv' },
+      { pattern: /\b(instruks|instruction)\b/i, type: 'Instruks' },
+      { pattern: /\b(reglement|regulations)\b/i, type: 'Reglement' }
+    ];
 
-  for (const { pattern, type } of lawTypePatterns) {
-    if (pattern.test(query)) {
-      filters.lawType = type;
-      break;
+    for (const { pattern, type } of lawTypePatterns) {
+      if (pattern.test(query)) {
+        filters.lawType = type;
+        break;
+      }
     }
   }
 
