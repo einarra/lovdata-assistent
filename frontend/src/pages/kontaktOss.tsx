@@ -6,7 +6,7 @@ export function KontaktOss() {
       <section className="contact-section">
         <h2>Kontakt oss</h2>
         <p>
-          Har du spørsmål om Lovdata Assistent, forslag til forbedringer eller ønsker om
+          Har du spørsmål om ParagrafSvar, forslag til forbedringer eller ønsker om
           samarbeid? Vi hører gjerne fra deg. Ta kontakt direkte via e-post
           eller telefon.
         </p>
