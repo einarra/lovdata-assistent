@@ -11,7 +11,7 @@ import type {
   ArchiveSearchResult,
   ArchiveDocumentRecord
 } from './types.js';
-import { extractQueryTokens } from './types.js';
+import { extractQueryTokens, expandLegalTerms } from './types.js';
 import { Timer } from '../utils/timing.js';
 import { env } from '../config/env.js';
 
@@ -533,17 +533,49 @@ export class SupabaseArchiveStore {
     const limit = Math.max(1, Math.min(options.limit || 10, 100)); // Clamp between 1 and 100
     const offset = Math.max(0, options.offset || 0);
 
-    const tokens = extractQueryTokens(query.toLowerCase());
+    // Expand legal terms before tokenization for better recall
+    const expandedQuery = expandLegalTerms(query);
+    
+    const tokens = extractQueryTokens(expandedQuery.toLowerCase());
     if (tokens.length === 0) {
       searchTimer.end({ hits: 0, total: 0, reason: 'no_tokens' });
       return { hits: [], total: 0 };
     }
 
     // Build Postgres tsquery from tokens
-    // Use prefix matching (:* ) for better recall on legal terms
-    // Example: "lov:*" matches "lovdata", "lovgivning", etc.
-    // Join with & (AND) for all terms must match
-    const tsQuery = tokens.map(token => `${token}:*`).join(' & ');
+    // Use exact matching for longer, specific legal terms (better precision)
+    // This prevents false matches like "deling" in "ikraftsetting" matching "skjevdeling"
+    // Only use prefix matching for very short terms (3 chars) that might have variations
+    const buildTokenQuery = (token: string): string => {
+      // Use exact matching for terms 4+ characters (better precision)
+      // This prevents partial word matches that cause irrelevant results
+      if (token.length >= 4) {
+        // Longer terms: use exact matching for better precision
+        // Example: "skjevdeling" (11 chars) will match exactly, not "deling" in other words
+        return token;
+      } else {
+        // Very short terms (3 chars): use prefix matching for variations
+        // Example: "lov" can match "lovdata", "lovgivning", etc.
+        return `${token}:*`;
+      }
+    };
+    
+    const tokenQueries = tokens.map(buildTokenQuery);
+    
+    // For multi-word queries, prioritize exact phrase matching
+    // This helps with queries where terms should appear together
+    let tsQuery: string;
+    if (tokens.length > 1) {
+      // Multi-word: use phrase matching (<->) for better relevance when terms appear together
+      // Also allow AND matches as fallback
+      const phraseQuery = tokenQueries.join(' <-> '); // <-> means "followed by" in tsquery
+      const andQuery = tokenQueries.join(' & ');
+      // Prioritize phrase matches, but also allow AND matches
+      tsQuery = `(${phraseQuery}) | (${andQuery})`;
+    } else {
+      // Single word: use the token query directly
+      tsQuery = tokenQueries[0] || tokens[0];
+    }
 
     // Use provided query embedding or generate one if hybrid search is available
     // Enhance query with context to improve relevance and reduce false positives

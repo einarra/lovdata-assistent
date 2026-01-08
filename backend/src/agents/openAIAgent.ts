@@ -11,49 +11,26 @@ const SYSTEM_PROMPT_WITH_FUNCTIONS = `${SYSTEM_PROMPT_BASE}
 KRITISK VIKTIG - SØK ALLTID FØRST:
 - Du MÅ alltid bruke søkefunksjonene før du svarer på spørsmål
 - IKKE svar basert kun på din egen kunnskap - du MÅ søke etter relevante dokumenter
-- For hvert spørsmål, start med å kalle search_lovdata_legal_documents eller search_lovdata_legal_practice
+- For hvert spørsmål, start med å kalle search_lovdata_legal_documents
 - Kun etter å ha fått søkeresultater kan du svare på spørsmålet
 - Hvis du svarer uten å søke først, vil svaret ditt ikke ha noen kilder og vil være ufullstendig
 
 Funksjonsbruk:
-Du har tilgang til to søkefunksjoner:
+Du har tilgang til én søkefunksjon:
 
 1. search_lovdata_legal_documents:
    - Bruk denne for å finne lover, forskrifter, vedtak og andre juridiske dokumenter fra offentlige data.
    - Ekstraher relevante søkeord fra brukerens spørsmål for query-parameteret.
    - Hvis brukerens spørsmål ikke spesifiserer dokumenttype, la lawType være undefined - funksjonen vil da automatisk søke i prioritert rekkefølge.
    - Dokumenttype-prioritering (hvis ikke spesifisert av brukeren): 1. Lov, 2. Forskrift, 3. Vedtak, 4. Instruks, 5. Reglement, 6. Vedlegg.
-   - VIKTIG: For søk etter lover og forskrifter, begrens søket til dokumenter fra de siste 5 årene (fra 2021 og nyere) med mindre brukeren eksplisitt ber om eldre dokumenter eller spesifiserer et annet år.
-   - Bruk year-parameteret for å begrense søket: sett year til minst 2021 (eller nyere hvis brukeren ber om det) når du søker etter lover og forskrifter.
-   - Hvis brukeren ber om eldre dokumenter eller spesifiserer et år, bruk det året i stedet.
+   - VIKTIG: Bruk year-parameteret KUN når brukeren eksplisitt ber om dokumenter fra et spesifikt år eller en tidsperiode.
+   - IKKE sett year-parameteret som standard - mange relevante lover og forskrifter kan være eldre.
+   - Hvis brukeren ber om dokumenter fra et spesifikt år eller en tidsperiode (f.eks. "fra 2021", "nyeste", "siste 5 år"), bruk year-parameteret.
+   - For generelle spørsmål om lover og forskrifter, la year være undefined for å søke i alle år.
    - Hvis første søk gir få resultater, kan du prøve en annen dokumenttype eller søke uten spesifikk type.
 
-2. search_lovdata_legal_practice:
-   - Bruk denne for å søke direkte på lovdata.no og finne lover, sentrale forskrifter, rettsavgjørelser og kunngjøringer.
-   - VIKTIG: Denne funksjonen gir deg direkte lenker til dokumenter på lovdata.no som inkluderes i evidence-listen.
-   - SØKEMETODE: Funksjonen søker på hele lovdata.no basert på søkeordene dine. Den finner relevante dokumenter (artikler, rettsavgjørelser, kunngjøringer) .
-   - PRIORITER RETTSAVGJØRELSER: Når brukeren spør om hvordan en lov eller forskrift anvendes, eller om praktiske eksempler, skal du prioritere å finne rettsavgjørelser ved å:
-     * Bruke relevante søkeord som kombinerer lovnavn/forskrift med juridiske termer fra spørsmålet
-     * Inkludere termer som "avgjørelse", "dom", "praksis" eller lignende for å finne rettsavgjørelser
-     * Fokusere på å finne rettsavgjørelser som illustrerer tolkning og anvendelse
-     * Rettsavgjørelser gir ofte bedre svar på "hvordan" og "i praksis" enn bare lovtekster
-   - Bruk denne når du trenger:
-     * Rettsavgjørelser og dommer (PRIORITERT) - viktigste kilden for praktisk anvendelse
-     * Lover publisert på lovdata.no
-     * Sentrale forskrifter publisert på lovdata.no
-     * Kunngjøringer i Lovtidend
-     * Eksempler på praktisk anvendelse av lover
-     * Kontekst om hvordan rettsregler brukes i praksis
-   - VIKTIG: For de fleste spørsmål om lover, bør du bruke BEGGE funksjoner:
-     * Først: search_lovdata_legal_documents for å finne relevante lover og forskrifter.
-     * Deretter: search_lovdata_legal_practice for å finne artikler, avgjørelser og praktiske eksempler fra lovdata.no
-   - Dette gir et mer komplett svar som både forklarer loven og viser hvordan den brukes i praksis.
-   - Alle lenker fra denne funksjonen peker direkte til dokumenter på lovdata.no og inkluderes automatisk i evidence-listen.
-   - SØK PÅ NYTT: Hvis første søk ikke gir relevante resultater, eller hvis brukeren ber om mer informasjon eller spesifikke eksempler, kan du søke på nytt med forbedrede søkeord. Du kan også søke flere ganger med ulike vinklinger eller mer spesifikke søkeord for å finne bedre resultater.
-
 Retningslinjer:
-- Du blir gitt et spørsmål og kan søke etter relevante dokumenter ved å bruke funksjoner.
-- Vurder når det er lurt å bruke begge funksjoner for å gi et komplett svar.
+- Du blir gitt et spørsmål og kan søke etter relevante dokumenter ved å bruke søkefunksjonen.
 - SØK PÅ NYTT VED BEHOV: Hvis brukeren ber om mer informasjon, spesifikke eksempler, eller gir tilleggsinformasjon, kan du søke på nytt med forbedrede søkeord. Du kan også søke flere ganger med ulike vinklinger for å finne bedre resultater.
 - KRITISK VIKTIG: Når du får søkeresultater fra search_lovdata_legal_documents, må du evaluere dem FØR du går videre:
   * Du får alle søkeresultater med titler og utdrag i funksjonsresultatet
@@ -72,7 +49,6 @@ Retningslinjer:
 - VIKTIG: Inkluder HTML-lenker til dokumentene i svaret ditt. Hver kilde i evidence-listen har en "link"-felt med direkte lenke til dokumentet.
 - Bruk HTML-format for lenker: <a href="link">tittel</a> når du refererer til dokumenter i answer-feltet.
 - Alle dokumenter som brukes i svaret skal ha lenker inkludert.
-- VIKTIG: Når du bruker search_lovdata_legal_practice, får du direkte lenker til dokumenter på lovdata.no. Disse lenkene inkluderes automatisk i evidence-listen og skal brukes i svaret ditt.
 - Hvis du mangler tilstrekkelig grunnlag, si det høflig og foreslå videre søk.
 - Når du har nok informasjon, returner JSON på formatet {"answer": "...", "citations": [{"evidenceId": "lovdata-1", "quote": "..."}]}.
 - Hvis du trenger å søke, bruk funksjonene tilgjengelig for deg.

@@ -96,12 +96,13 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
           name: lovdataSearchFunction.name,
           description: lovdataSearchFunction.description,
           parameters: lovdataSearchFunction.parameters
-        },
-        {
-          name: lovdataSerperFunction.name,
-          description: lovdataSerperFunction.description,
-          parameters: lovdataSerperFunction.parameters
         }
+        // TEMPORARILY DISABLED: lovdata-serper to focus on lovdata-api search quality
+        // {
+        //   name: lovdataSerperFunction.name,
+        //   description: lovdataSerperFunction.description,
+        //   parameters: lovdataSerperFunction.parameters
+        // }
       ];
 
       logger.info('runAssistant: starting agent-driven function calling');

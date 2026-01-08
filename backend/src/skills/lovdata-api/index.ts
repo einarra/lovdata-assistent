@@ -484,12 +484,19 @@ function enhanceQueryForEmbedding(
 ): string {
   const parts: string[] = [];
   
-  // Extract core search terms (remove law type prefixes)
+  // Keep original query terms intact - don't remove important context
+  // Only extract core terms for additional context, but keep full query
   const coreTerms = extractCoreSearchTerms(query);
   
   // Add context about what we're searching for
+  // Use original query first to preserve all important terms
   parts.push('Søk etter juridiske dokumenter om:');
-  parts.push(coreTerms); // Use core terms instead of full query
+  parts.push(query); // Use full original query to preserve all terms
+  
+  // Add core terms as additional context if they differ from full query
+  if (coreTerms !== query && coreTerms.length > 0) {
+    parts.push(`Kjernebegreper: ${coreTerms}`);
+  }
   
   // Add filter context if available to narrow down search
   if (filters?.lawType) {
@@ -502,7 +509,7 @@ function enhanceQueryForEmbedding(
     parts.push(`Departement: ${filters.ministry}`);
   }
   
-  // Add instruction to exclude irrelevant laws
+  // Add instruction to find relevant documents
   // This helps the embedding model understand we want specific, relevant results
   parts.push('Finn relevante dokumenter som direkte svarer på spørsmålet.');
   
