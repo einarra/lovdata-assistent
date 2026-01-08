@@ -74,8 +74,8 @@ const LEGAL_TERM_EXPANSIONS: Record<string, string[]> = {
  * Maps to key terms that appear in the official law title
  */
 const LAW_NAME_TO_OFFICIAL_TITLE: Record<string, string[]> = {
-  'ekteskapsloven': ['lov 4. juli 1991 nr. 47 om ekteskap', 'lov 4 juli 1991 nr 47 om ekteskap', '1991 nr 47'],
-  'ekteskapslova': ['lov 4. juli 1991 nr. 47 om ekteskap', 'lov 4 juli 1991 nr 47 om ekteskap', '1991 nr 47'],
+  'ekteskapsloven': ['lov 4. juli 1991 nr. 47 om ekteskap', 'lov 4 juli 1991 nr 47 om ekteskap', '1991 nr 47', 'nr 47', 'nr. 47', 'lov 1991 47'],
+  'ekteskapslova': ['lov 4. juli 1991 nr. 47 om ekteskap', 'lov 4 juli 1991 nr 47 om ekteskap', '1991 nr 47', 'nr 47', 'nr. 47', 'lov 1991 47'],
   'arveloven': ['lov om arv', 'arvelov'],
   'arbeidsmiljøloven': ['lov om arbeidsmiljø', 'arbeidsmiljølov'],
   'barnebidragsloven': ['lov om barnebidrag', 'barnebidragslov'],

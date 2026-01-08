@@ -102,30 +102,95 @@ export async function searchLovdataPublicData(options: {
     return titleLower.includes('endring') || 
            titleLower.includes('endringer') ||
            titleLower.includes('ikraftsetting') ||
+           titleLower.includes('ikraftsetjing') ||
+           titleLower.includes('ikrafttredelse') ||
            titleLower.includes('delegering') ||
-           titleLower.includes('overføring');
+           titleLower.includes('overføring') ||
+           titleLower.includes('opphevelse') ||
+           titleLower.startsWith('forskrift');
+  };
+  
+  // Check if a title matches the exact base law pattern
+  // Base laws typically have format: "Lov [date] nr. [number] om [subject]"
+  // Example: "Lov 4. juli 1991 nr. 47 om ekteskap"
+  const isExactBaseLaw = (title: string | null, query: string): boolean => {
+    if (!title) return false;
+    const titleLower = title.toLowerCase();
+    const queryLower = query.toLowerCase();
+    
+    // Check if query mentions a law name (e.g., "ekteskapsloven")
+    // and if title matches the official law pattern without "endring" etc.
+    const lawNamePatterns = [
+      { 
+        name: 'ekteskapsloven', 
+        patterns: [
+          /^lov\s+4\.?\s+juli\s+1991\s+nr\.?\s+47\s+om\s+ekteskap/i,
+          /^lov\s+4\s+juli\s+1991\s+nr\s+47\s+om\s+ekteskap/i,
+          /lov\s+1991\s+nr\.?\s+47\s+om\s+ekteskap/i,
+        ]
+      },
+      { 
+        name: 'ekteskapslova', 
+        patterns: [
+          /^lov\s+4\.?\s+juli\s+1991\s+nr\.?\s+47\s+om\s+ekteskap/i,
+          /^lov\s+4\s+juli\s+1991\s+nr\s+47\s+om\s+ekteskap/i,
+          /lov\s+1991\s+nr\.?\s+47\s+om\s+ekteskap/i,
+        ]
+      },
+    ];
+    
+    for (const { name, patterns } of lawNamePatterns) {
+      if (queryLower.includes(name)) {
+        for (const pattern of patterns) {
+          if (pattern.test(titleLower)) {
+            // Make sure it's not an amendment law
+            if (!isAmendmentLaw(title)) {
+              return true;
+            }
+          }
+        }
+      }
+    }
+    
+    // Also check for exact match pattern: "Lov [date] nr. [number] om [subject]"
+    // without "endring", "forskrift", etc. at the start
+    // This catches base laws even if the query doesn't mention the law name
+    const exactLawPattern = /^lov\s+\d+\.?\s+\w+\s+\d+\s+nr\.?\s+\d+\s+om\s+/i;
+    if (exactLawPattern.test(titleLower) && !isAmendmentLaw(title)) {
+      // Additional check: if query mentions "ekteskap", prioritize laws about ekteskap
+      if (queryLower.includes('ekteskap') && titleLower.includes('ekteskap')) {
+        return true;
+      }
+      // If query doesn't mention ekteskap, still consider it a base law (but lower priority)
+      // This will be handled by the three-tier boosting
+    }
+    
+    return false;
   };
 
-  const boostBaseLaws = (hits: typeof result.hits): typeof result.hits => {
-    // Separate base laws and amendment laws
-    const baseLaws: typeof result.hits = [];
+  const boostBaseLaws = (hits: typeof result.hits, searchQuery: string): typeof result.hits => {
+    // Separate exact base laws, other base laws, and amendment laws
+    const exactBaseLaws: typeof result.hits = [];
+    const otherBaseLaws: typeof result.hits = [];
     const amendmentLaws: typeof result.hits = [];
     
     for (const hit of hits) {
       if (isAmendmentLaw(hit.title)) {
         amendmentLaws.push(hit);
+      } else if (isExactBaseLaw(hit.title, searchQuery)) {
+        exactBaseLaws.push(hit);
       } else {
-        baseLaws.push(hit);
+        otherBaseLaws.push(hit);
       }
     }
     
-    // Return base laws first, then amendment laws
+    // Return exact base laws first (highest priority), then other base laws, then amendment laws
     // This ensures the actual law appears before laws that change it
-    return [...baseLaws, ...amendmentLaws];
+    return [...exactBaseLaws, ...otherBaseLaws, ...amendmentLaws];
   };
 
   // Apply base law boosting before re-ranking
-  finalHits = boostBaseLaws(result.hits);
+  finalHits = boostBaseLaws(result.hits, query);
 
   // Re-rank results if enabled and we have candidates
   if (enableReranking && finalHits.length > 0) {
@@ -167,19 +232,23 @@ export async function searchLovdataPublicData(options: {
       
       // Apply additional boost to base laws after re-ranking
       // This ensures base laws stay at the top even after semantic re-ranking
-      const baseLawsAfterRerank: typeof rerankedHits = [];
+      const exactBaseLawsAfterRerank: typeof rerankedHits = [];
+      const otherBaseLawsAfterRerank: typeof rerankedHits = [];
       const amendmentLawsAfterRerank: typeof rerankedHits = [];
       
       for (const hit of rerankedHits) {
         if (isAmendmentLaw(hit.title)) {
           amendmentLawsAfterRerank.push(hit);
+        } else if (isExactBaseLaw(hit.title, query)) {
+          exactBaseLawsAfterRerank.push(hit);
         } else {
-          baseLawsAfterRerank.push(hit);
+          otherBaseLawsAfterRerank.push(hit);
         }
       }
       
-      // Combine: base laws first (preserving rerank order), then amendment laws (preserving rerank order)
-      finalHits = [...baseLawsAfterRerank, ...amendmentLawsAfterRerank];
+      // Combine: exact base laws first (highest priority), then other base laws, then amendment laws
+      // This ensures the actual law appears before laws that change it
+      finalHits = [...exactBaseLawsAfterRerank, ...otherBaseLawsAfterRerank, ...amendmentLawsAfterRerank];
       
       // Apply pagination to final results
       finalHits = finalHits.slice(offset, offset + pageSize);
