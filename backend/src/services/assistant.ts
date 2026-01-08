@@ -280,20 +280,35 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
                         filename: lovdataResult.hits[0].filename,
                         member: lovdataResult.hits[0].member,
                         hasSnippet: !!lovdataResult.hits[0].snippet,
-                        snippetLength: lovdataResult.hits[0].snippet?.length ?? 0
-                      } : null
+                        snippetLength: lovdataResult.hits[0].snippet?.length ?? 0,
+                        hasUrl: !!lovdataResult.hits[0].url,
+                        url: lovdataResult.hits[0].url
+                      } : null,
+                      allHits: lovdataResult.hits?.map(h => ({
+                        filename: h.filename,
+                        member: h.member,
+                        title: h.title,
+                        hasUrl: !!h.url
+                      })) ?? []
                     }, 'runAssistant: lovdata result structure');
                     
                     const newEvidence = convertLovdataSkillResultsToEvidence(lovdataResult.hits ?? []);
                     
                     logger.info({
                       newEvidenceCount: newEvidence.length,
+                      inputHitsCount: lovdataResult.hits?.length ?? 0,
+                      evidenceIds: newEvidence.map(e => e.id),
                       evidenceSample: newEvidence[0] ? {
                         id: newEvidence[0].id,
                         source: newEvidence[0].source,
                         hasTitle: !!newEvidence[0].title,
-                        hasSnippet: !!newEvidence[0].snippet
-                      } : null
+                        hasSnippet: !!newEvidence[0].snippet,
+                        hasLink: !!newEvidence[0].link,
+                        link: newEvidence[0].link
+                      } : null,
+                      warning: newEvidence.length !== (lovdataResult.hits?.length ?? 0)
+                        ? `WARNING: Evidence count (${newEvidence.length}) doesn't match hits count (${lovdataResult.hits?.length ?? 0})`
+                        : undefined
                     }, 'runAssistant: evidence conversion result');
                     
                     // Add evidence immediately to ensure it's available in the response
@@ -302,14 +317,36 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
                     const uniqueNewEvidence = newEvidence.filter(e => {
                       const key = `${e.metadata?.filename}:${e.metadata?.member}`;
                       if (existingKeys.has(key)) {
+                        logger.debug({
+                          key,
+                          evidenceId: e.id,
+                          message: 'Skipping duplicate evidence'
+                        }, 'runAssistant: duplicate evidence filtered');
                         return false;
                       }
                       existingKeys.add(key);
                       return true;
                     });
                     
+                    logger.info({
+                      totalHits: lovdataResult.hits?.length ?? 0,
+                      newEvidenceCount: newEvidence.length,
+                      uniqueNewEvidenceCount: uniqueNewEvidence.length,
+                      existingEvidenceCount: agentEvidence.length,
+                      duplicatesFiltered: newEvidence.length - uniqueNewEvidence.length,
+                      message: uniqueNewEvidence.length < newEvidence.length
+                        ? `WARNING: ${newEvidence.length - uniqueNewEvidence.length} duplicate(s) filtered out`
+                        : 'All evidence is unique'
+                    }, 'runAssistant: evidence deduplication');
+                    
                     // Add evidence immediately - it will be removed if agent refines the search
                     agentEvidence = [...agentEvidence, ...uniqueNewEvidence];
+                    
+                    logger.info({
+                      totalEvidenceAfterAdd: agentEvidence.length,
+                      lovdataEvidenceCount: agentEvidence.filter(e => e.source === 'lovdata').length,
+                      allEvidenceIds: agentEvidence.map(e => e.id)
+                    }, 'runAssistant: evidence added to agentEvidence');
                     
                     // Format function result with evaluation guidance for agent
                     // Include ALL results (not just samples) so agent can evaluate properly
@@ -1092,7 +1129,7 @@ function buildEvidence(result: LovdataSkillSearchResult): AgentEvidence[] {
       snippet: hit.snippet,
       date: hit.date ?? null,
       // Use URL from search result if available, otherwise build it
-      // The URL will be updated to actual lovdata.no URL from XML in updateLinksForHtmlContent
+      // The URL will be updated to HTML viewer URL from RAG system in updateLinksForHtmlContent
       link: hit.url ?? buildXmlViewerUrl(hit.filename, hit.member),
       metadata: {
         filename: hit.filename,
@@ -1172,9 +1209,9 @@ function convertLovdataSkillResultsToEvidence(hits: Array<{
     title: hit.title ?? hit.filename ?? 'Uten tittel',
     snippet: hit.snippet,
     date: hit.date ?? null,
-    // Use URL from search result if available, otherwise build it
-    // The URL will be updated to actual lovdata.no URL from XML in updateLinksForHtmlContent
-    link: hit.url ?? buildXmlViewerUrl(hit.filename, hit.member),
+      // Use URL from search result if available, otherwise build it
+      // The URL will be updated to HTML viewer URL from RAG system in updateLinksForHtmlContent
+      link: hit.url ?? buildXmlViewerUrl(hit.filename, hit.member),
     metadata: {
       filename: hit.filename,
       member: hit.member

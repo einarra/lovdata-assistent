@@ -11,7 +11,7 @@ export type LovdataArchiveHit = {
   title: string | null;
   date: string | null;
   snippet: string;
-  url: string | null; // Web link to the document (API viewer URL, can be updated to lovdata.no URL from XML)
+  url: string | null; // Web link to the document (API HTML viewer URL from RAG system)
 };
 
 export type LovdataSearchResult = {
@@ -162,19 +162,23 @@ export async function searchLovdataPublicData(options: {
     reranked: enableReranking && result.hits.length > 0
   });
 
-  // Build URLs for each hit using the API viewer endpoint
-  // These URLs can later be updated to actual lovdata.no URLs extracted from XML
-  const buildXmlViewerUrl = (filename: string | undefined, member: string | undefined): string | null => {
+  // Build URLs for each hit using the API HTML viewer endpoint
+  // Convert .xml members to .html for the viewer URL to ensure links point to HTML content
+  const buildHtmlViewerUrl = (filename: string | undefined, member: string | undefined): string | null => {
     if (!filename || !member) {
       return null;
     }
     try {
+      // Convert .xml member to .html for the viewer URL
+      const htmlMember = member.toLowerCase().endsWith('.xml')
+        ? member.replace(/\.xml$/i, '.html')
+        : member;
       const url = new URL('/api/documents/xml', env.PUBLIC_API_BASE_URL);
       url.searchParams.set('filename', filename);
-      url.searchParams.set('member', member);
+      url.searchParams.set('member', htmlMember);
       return url.toString();
     } catch (error) {
-      logger.error({ err: error, filename, member }, 'Failed to build XML viewer URL');
+      logger.error({ err: error, filename, member }, 'Failed to build HTML viewer URL');
       return null;
     }
   };
@@ -186,7 +190,7 @@ export async function searchLovdataPublicData(options: {
       title: hit.title,
       date: hit.date,
       snippet: hit.snippet,
-      url: buildXmlViewerUrl(hit.filename, hit.member) // Include web link to document
+      url: buildHtmlViewerUrl(hit.filename, hit.member) // Include web link to HTML document viewer
     })),
     searchedFiles,
     totalHits: result.total,
