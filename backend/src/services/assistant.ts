@@ -141,7 +141,16 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
             logger.info({
               evidenceCount: agentEvidence.length,
               functionResultsCount: functionResults.length,
-              iteration: iteration + 1
+              iteration: iteration + 1,
+              evidenceSources: {
+                lovdata: agentEvidence.filter(e => e.source === 'lovdata').length,
+                serper: agentEvidence.filter(e => e.source === 'serper:lovdata.no').length,
+                other: agentEvidence.filter(e => e.source !== 'lovdata' && e.source !== 'serper:lovdata.no').length
+              },
+              evidenceIds: agentEvidence.map(e => e.id),
+              message: agentEvidence.length === 0 && iteration === 0
+                ? 'First iteration with no evidence - agent should call search functions'
+                : undefined
             }, 'runAssistant: calling agent.generate');
             
             const agentResult = await agent.generate(agentInput);
@@ -486,7 +495,16 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
               // Agent has final answer
               agentOutput = agentResult;
               usedAgent = true;
-              logger.info('runAssistant: agent provided final answer');
+              logger.info({
+                evidenceCount: agentEvidence.length,
+                hasEvidence: agentEvidence.length > 0,
+                lovdataCount: agentEvidence.filter(e => e.source === 'lovdata').length,
+                serperCount: agentEvidence.filter(e => e.source === 'serper:lovdata.no').length,
+                iteration: iteration + 1,
+                message: agentEvidence.length === 0 
+                  ? 'WARNING: Agent provided answer but no evidence was collected - answer may not be based on search results'
+                  : 'Agent provided answer with evidence'
+              }, 'runAssistant: agent provided final answer');
               break;
             }
           } catch (agentError) {
@@ -537,12 +555,24 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
         lovdataCount: lovdataEvidenceCount,
         serperCount: serperEvidenceCount,
         otherCount: otherEvidenceCount,
+        usedAgent,
+        hasAgentOutput: !!agentOutput,
         serperSample: agentEvidence.filter(e => e.source === 'serper:lovdata.no').slice(0, 3).map(e => ({
           id: e.id,
           title: e.title,
           hasLink: !!e.link,
           link: e.link
-        }))
+        })),
+        lovdataSample: agentEvidence.filter(e => e.source === 'lovdata').slice(0, 3).map(e => ({
+          id: e.id,
+          title: e.title,
+          hasLink: !!e.link,
+          filename: e.metadata?.filename,
+          member: e.metadata?.member
+        })),
+        warning: agentEvidence.length === 0 && usedAgent 
+          ? 'WARNING: No evidence collected but agent was used - answer may not be based on search results'
+          : undefined
       }, 'runAssistant: evidence breakdown before link update');
       
       // Update links for HTML content
@@ -644,7 +674,10 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
           lovdataEvidenceInResponse: response.evidence.filter(e => e.source === 'lovdata').length,
           citationsCount: response.citations.length,
           evidenceIds: response.evidence.map(e => e.id),
-          citationIds: response.citations.map(c => c.evidenceId)
+          citationIds: response.citations.map(c => c.evidenceId),
+          warning: response.evidence.length === 0
+            ? 'CRITICAL: Response has NO evidence - agent may have answered without searching'
+            : undefined
         }, 'runAssistant: response built with agent output - evidence matches citations');
       } else {
         logger.info('runAssistant: building fallback response');
