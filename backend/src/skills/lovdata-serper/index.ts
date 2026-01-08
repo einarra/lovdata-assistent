@@ -85,15 +85,20 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
     lovdataResponse = lovdataResult;
     domstolResponse = domstolResult;
     
+    const lovdataCount = Array.isArray(lovdataResponse.organic) ? lovdataResponse.organic.length : 0;
+    const domstolCount = Array.isArray(domstolResponse.organic) ? domstolResponse.organic.length : 0;
+    
     logger.info({ 
-      lovdataOrganicCount: Array.isArray(lovdataResponse.organic) ? lovdataResponse.organic.length : 0,
-      domstolOrganicCount: Array.isArray(domstolResponse.organic) ? domstolResponse.organic.length : 0
+      lovdataOrganicCount: lovdataCount,
+      domstolOrganicCount: domstolCount,
+      lovdataSampleLinks: (lovdataResponse.organic ?? []).slice(0, 3).map(item => item.link),
+      domstolSampleLinks: (domstolResponse.organic ?? []).slice(0, 3).map(item => item.link)
     }, 'lovdata-serper: both searches completed');
     
-    // Merge results from both sites
+    // Merge results from both sites, tagging each with its source
     const mergedOrganic = [
-      ...(lovdataResponse.organic ?? []),
-      ...(domstolResponse.organic ?? [])
+      ...(lovdataResponse.organic ?? []).map(item => ({ ...item, _source: 'lovdata.no' })),
+      ...(domstolResponse.organic ?? []).map(item => ({ ...item, _source: 'domstol.no' }))
     ];
     
     // Create merged response
@@ -110,8 +115,18 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
       response.organic = response.organic.slice(0, input.num);
     }
     
+    const totalCount = response.organic?.length ?? 0;
+    const lovdataResults = (response.organic ?? []).filter(item => (item as any)._source === 'lovdata.no').length;
+    const domstolResults = (response.organic ?? []).filter(item => (item as any)._source === 'domstol.no').length;
+    
     logger.info({ 
-      totalOrganicCount: response.organic?.length ?? 0
+      totalOrganicCount: totalCount,
+      lovdataResultsInFinal: lovdataResults,
+      domstolResultsInFinal: domstolResults,
+      domstolLinksInFinal: (response.organic ?? [])
+        .filter(item => (item as any)._source === 'domstol.no')
+        .slice(0, 5)
+        .map(item => item.link)
     }, 'lovdata-serper: results merged and prioritized');
     
     const organic = (response.organic ?? []).map(item => ({
@@ -119,7 +134,8 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
       link: item.link ?? null,
       snippet: item.snippet ?? null,
       date: item.date ?? null,
-      isDocument: SerperClient.isDocumentLink(item.link) // Add flag to indicate if it's a document link
+      isDocument: SerperClient.isDocumentLink(item.link), // Add flag to indicate if it's a document link
+      source: (item as any)._source ?? null // Track which site the result came from
     }));
 
     logger.info({ 
@@ -134,7 +150,9 @@ export async function execute(io: SkillIO, ctx: SkillContext): Promise<SkillOutp
       meta: {
         skill: 'lovdata-serper',
         action: 'search',
-        totalOrganicResults: organic.length
+        totalOrganicResults: organic.length,
+        lovdataResults: organic.filter(item => item.source === 'lovdata.no').length,
+        domstolResults: organic.filter(item => item.source === 'domstol.no').length
       }
     };
   } catch (searchError) {
