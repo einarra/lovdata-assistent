@@ -534,7 +534,17 @@ export class SupabaseArchiveStore {
     const offset = Math.max(0, options.offset || 0);
 
     // Expand legal terms before tokenization for better recall
+    // This maps common law names (e.g., "ekteskapsloven") to official titles/key identifiers
     const expandedQuery = expandLegalTerms(query);
+    
+    // Log query expansion for debugging
+    if (expandedQuery !== query) {
+      this.logs.debug({
+        originalQuery: query,
+        expandedQuery: expandedQuery,
+        expansionLength: expandedQuery.length - query.length
+      }, 'searchAsync: query expanded with legal terms and law name mappings');
+    }
     
     const tokens = extractQueryTokens(expandedQuery.toLowerCase());
     if (tokens.length === 0) {

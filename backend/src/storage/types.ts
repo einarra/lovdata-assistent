@@ -69,25 +69,58 @@ const LEGAL_TERM_EXPANSIONS: Record<string, string[]> = {
 };
 
 /**
+ * Common law name to official title/key identifiers mapping
+ * This helps find base laws when searching by common name (e.g., "ekteskapsloven")
+ * Maps to key terms that appear in the official law title
+ */
+const LAW_NAME_TO_OFFICIAL_TITLE: Record<string, string[]> = {
+  'ekteskapsloven': ['lov 4. juli 1991 nr. 47 om ekteskap', 'lov 4 juli 1991 nr 47 om ekteskap', '1991 nr 47'],
+  'ekteskapslova': ['lov 4. juli 1991 nr. 47 om ekteskap', 'lov 4 juli 1991 nr 47 om ekteskap', '1991 nr 47'],
+  'arveloven': ['lov om arv', 'arvelov'],
+  'arbeidsmiljøloven': ['lov om arbeidsmiljø', 'arbeidsmiljølov'],
+  'barnebidragsloven': ['lov om barnebidrag', 'barnebidragslov'],
+  'personvernloven': ['lov om personvern', 'personvernlov'],
+  'kjøpsloven': ['lov om kjøp', 'kjøpslov'],
+  'forbrukerkjøpsloven': ['lov om forbrukerkjøp', 'forbrukerkjøpslov'],
+  'husleieloven': ['lov om husleie', 'husleielov'],
+  'diskrimineringsloven': ['lov om diskriminering', 'diskrimineringslov'],
+  'likestillingsloven': ['lov om likestilling', 'likestillingslov'],
+};
+
+/**
  * Expands legal terms in query to include related terms for better search recall
+ * Also maps common law names (e.g., "ekteskapsloven") to official titles/key identifiers
  */
 export function expandLegalTerms(query: string): string {
   const queryLower = query.toLowerCase();
   const words = queryLower.split(/\s+/);
   const expandedTerms: string[] = [];
+  const officialTitleTerms: string[] = [];
   
   for (const word of words) {
     const cleanWord = word.replace(/[^\p{L}\p{N}]/gu, '');
+    
+    // Check for legal term expansions
     if (LEGAL_TERM_EXPANSIONS[cleanWord]) {
       expandedTerms.push(...LEGAL_TERM_EXPANSIONS[cleanWord]);
     }
+    
+    // Check for common law name to official title mapping
+    // This helps find base laws when searching by common name
+    if (LAW_NAME_TO_OFFICIAL_TITLE[cleanWord]) {
+      officialTitleTerms.push(...LAW_NAME_TO_OFFICIAL_TITLE[cleanWord]);
+    }
   }
   
+  // Build expanded query: original + expanded terms + official title terms
+  const parts: string[] = [query];
   if (expandedTerms.length > 0) {
-    // Add expanded terms to query, but keep original query first
-    return `${query} ${expandedTerms.join(' ')}`;
+    parts.push(...expandedTerms);
+  }
+  if (officialTitleTerms.length > 0) {
+    parts.push(...officialTitleTerms);
   }
   
-  return query;
+  return parts.join(' ');
 }
 
