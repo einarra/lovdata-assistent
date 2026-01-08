@@ -712,8 +712,11 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
           hasAgentCitations: !!(agentOutput.citations && agentOutput.citations.length > 0)
         }, 'runAssistant: filtered evidence to match agent citations');
         
+        // Sanitize answer text to fix malformed HTML links (e.g., extra closing parentheses)
+        const sanitizedAnswer = sanitizeAnswerLinks(agentOutput.answer ?? 'Jeg klarte ikke å generere et svar.');
+        
         response = {
-          answer: agentOutput.answer ?? 'Jeg klarte ikke å generere et svar.',
+          answer: sanitizedAnswer,
           evidence: finalEvidence, // Only include evidence that agent actually cited
           citations: finalCitations,
           pagination,
@@ -1383,6 +1386,72 @@ function extractLovdataUrlFromXml(xmlContent: string | null | undefined): string
     logger.debug({ err: error }, 'extractLovdataUrlFromXml: error extracting URL');
     return null;
   }
+}
+
+/**
+ * Sanitizes answer text to fix malformed HTML links, specifically removing extra closing parentheses
+ * that might appear in href attributes or after link closing tags.
+ * Examples:
+ * - `<a href="https://example.com/doc)">Title</a>` -> `<a href="https://example.com/doc">Title</a>`
+ * - `<a href="https://example.com/doc">Title)</a>` -> `<a href="https://example.com/doc">Title</a>`
+ */
+function sanitizeAnswerLinks(answer: string): string {
+  if (!answer) {
+    return answer;
+  }
+
+  let sanitized = answer;
+
+  // Fix links with extra closing parenthesis in href attribute value
+  // Pattern: href="url)" where the ) is at the end of the URL before the closing quote
+  // Only remove ) if it's not part of a balanced URL (i.e., no opening ( before it)
+  sanitized = sanitized.replace(/href="([^"]*)\)"/gi, (match, url) => {
+    // Remove trailing ) if URL ends with it and doesn't have a matching opening parenthesis
+    // This handles cases where the agent incorrectly adds ) to the URL
+    if (url.endsWith(')')) {
+      // Count parentheses to check if balanced
+      const openCount = (url.match(/\(/g) || []).length;
+      const closeCount = (url.match(/\)/g) || []).length;
+      // If there's an extra closing parenthesis, remove it
+      if (closeCount > openCount) {
+        const fixed = `href="${url.substring(0, url.length - 1)}"`;
+        logger.debug({ original: match, fixed }, 'sanitizeAnswerLinks: removed trailing ) from href');
+        return fixed;
+      }
+    }
+    return match;
+  });
+
+  // Fix links with extra closing parenthesis right before </a> tag
+  // Pattern: )</a> where the ) is immediately before the closing tag
+  // This handles cases like: <a href="url">text)</a>
+  sanitized = sanitized.replace(/([^)])\s*\)\s*<\/a>/gi, (match, before) => {
+    // Only remove ) if it's right before </a> and not part of balanced parentheses in the text
+    const fixed = `${before}</a>`;
+    logger.debug({ original: match, fixed }, 'sanitizeAnswerLinks: removed ) before </a>');
+    return fixed;
+  });
+
+  // Fix href with trailing ) before > (when href is not quoted properly)
+  // Pattern: href=url)> where ) comes before >
+  sanitized = sanitized.replace(/href=([^\s>"]*)\)>/gi, (match, url) => {
+    if (url && url.endsWith(')')) {
+      const fixed = `href=${url.substring(0, url.length - 1)}>`;
+      logger.debug({ original: match, fixed }, 'sanitizeAnswerLinks: removed ) from href before >');
+      return fixed;
+    }
+    return match;
+  });
+
+  if (sanitized !== answer) {
+    logger.info({ 
+      originalLength: answer.length, 
+      sanitizedLength: sanitized.length,
+      changed: true
+    }, 'sanitizeAnswerLinks: sanitized answer text to remove extra closing parentheses from links');
+  }
+
+  return sanitized;
 }
 
 function buildXmlViewerUrl(
