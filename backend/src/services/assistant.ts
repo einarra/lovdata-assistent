@@ -300,7 +300,8 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
                       })) ?? []
                     }, 'runAssistant: lovdata result structure');
                     
-                    const newEvidence = convertLovdataSkillResultsToEvidence(lovdataResult.hits ?? []);
+                    const newEvidence = convertLovdataSkillResultsToEvidence(lovdataResult.hits ?? [])
+                      .map(e => ({ ...e, link: sanitizeEvidenceLink(e.link) }));
                     
                     logger.info({
                       newEvidenceCount: newEvidence.length,
@@ -469,7 +470,8 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
                       })) ?? []
                     }, 'runAssistant: serper result structure');
                     
-                    const newEvidence = convertSerperResultsToEvidence(serperResult.organic ?? []);
+                    const newEvidence = convertSerperResultsToEvidence(serperResult.organic ?? [])
+                      .map(e => ({ ...e, link: sanitizeEvidenceLink(e.link) }));
                     
                     logger.info({
                       newEvidenceCount: newEvidence.length,
@@ -638,27 +640,33 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
       const evidenceWithUpdatedLinks = await updateLinksForHtmlContent(agentEvidence, services);
       logger.info({ updatedCount: evidenceWithUpdatedLinks.length }, 'runAssistant: links updated');
       
+      // Sanitize links in evidence to remove trailing ")." or similar malformed patterns
+      const evidenceWithSanitizedLinks = evidenceWithUpdatedLinks.map(item => ({
+        ...item,
+        link: sanitizeEvidenceLink(item.link)
+      }));
+      
       // Log evidence breakdown after processing
-      const lovdataEvidenceCountAfter = evidenceWithUpdatedLinks.filter(e => e.source === 'lovdata').length;
-      const serperEvidenceCountAfter = evidenceWithUpdatedLinks.filter(e => e.source === 'serper:lovdata.no').length;
+      const lovdataEvidenceCountAfter = evidenceWithSanitizedLinks.filter(e => e.source === 'lovdata').length;
+      const serperEvidenceCountAfter = evidenceWithSanitizedLinks.filter(e => e.source === 'serper:lovdata.no').length;
       logger.info({
-        totalEvidence: evidenceWithUpdatedLinks.length,
+        totalEvidence: evidenceWithSanitizedLinks.length,
         lovdataCount: lovdataEvidenceCountAfter,
         serperCount: serperEvidenceCountAfter,
-        serperSample: evidenceWithUpdatedLinks.filter(e => e.source === 'serper:lovdata.no').slice(0, 3).map(e => ({
+        serperSample: evidenceWithSanitizedLinks.filter(e => e.source === 'serper:lovdata.no').slice(0, 3).map(e => ({
           id: e.id,
           title: e.title,
           hasLink: !!e.link,
           link: e.link
         }))
-      }, 'runAssistant: evidence breakdown after link update');
+      }, 'runAssistant: evidence breakdown after link update and sanitization');
       
-      // Update agentEvidence with updated links
-      agentEvidence = evidenceWithUpdatedLinks;
+      // Update agentEvidence with sanitized links
+      agentEvidence = evidenceWithSanitizedLinks;
 
       // Calculate pagination based on all evidence (before filtering to cited evidence)
       // This ensures pagination reflects the total available evidence, not just what's cited
-      const totalEvidenceCount = evidenceWithUpdatedLinks.length;
+      const totalEvidenceCount = evidenceWithSanitizedLinks.length;
       const pagination = {
         page: result.page ?? page,
         pageSize: result.pageSize ?? pageSize,
@@ -671,10 +679,10 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
       logger.info({ usedAgent, hasAgentOutput: !!agentOutput }, 'runAssistant: building response');
 
       // Final check: ensure serper evidence is included
-      const finalSerperEvidence = evidenceWithUpdatedLinks.filter(e => e.source === 'serper:lovdata.no');
-      const finalLovdataEvidence = evidenceWithUpdatedLinks.filter(e => e.source === 'lovdata');
+      const finalSerperEvidence = evidenceWithSanitizedLinks.filter(e => e.source === 'serper:lovdata.no');
+      const finalLovdataEvidence = evidenceWithSanitizedLinks.filter(e => e.source === 'lovdata');
       logger.info({
-        finalTotalEvidence: evidenceWithUpdatedLinks.length,
+        finalTotalEvidence: evidenceWithSanitizedLinks.length,
         finalSerperCount: finalSerperEvidence.length,
         finalLovdataCount: finalLovdataEvidence.length,
         finalSerperEvidence: finalSerperEvidence.map(e => ({
@@ -689,22 +697,22 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
         logger.info('runAssistant: building response with agent output');
         
         // Normalize citations first to get the list of evidence IDs that agent actually cited
-        const normalizedCitations = normaliseCitations(agentOutput.citations ?? [], evidenceWithUpdatedLinks, pagination);
+        const normalizedCitations = normaliseCitations(agentOutput.citations ?? [], evidenceWithSanitizedLinks, pagination);
         
         // Filter evidence to only include sources that agent actually cited
         const citedEvidenceIds = new Set(normalizedCitations.map(c => c.evidenceId));
-        const filteredEvidence = evidenceWithUpdatedLinks.filter(e => citedEvidenceIds.has(e.id));
+        const filteredEvidence = evidenceWithSanitizedLinks.filter(e => citedEvidenceIds.has(e.id));
         
         // Include all evidence in the response, not just cited evidence
         // This ensures users can see all documents that were found, even if not explicitly cited
         // The agent can still cite specific evidence in the answer, but all evidence is available
-        const finalEvidence = evidenceWithUpdatedLinks;
+        const finalEvidence = evidenceWithSanitizedLinks;
         
         // Re-normalize citations with filtered evidence to ensure correct numbering
         const finalCitations = normaliseCitations(agentOutput.citations ?? [], finalEvidence, pagination);
         
         logger.info({
-          totalEvidenceBeforeFilter: evidenceWithUpdatedLinks.length,
+          totalEvidenceBeforeFilter: evidenceWithSanitizedLinks.length,
           citedEvidenceIds: Array.from(citedEvidenceIds),
           filteredEvidenceCount: filteredEvidence.length,
           finalEvidenceCount: finalEvidence.length,
@@ -743,11 +751,11 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
         }, 'runAssistant: response built with agent output - evidence matches citations');
       } else {
         logger.info('runAssistant: building fallback response');
-        const fallbackAnswer = buildFallbackAnswer(question, evidenceWithUpdatedLinks, null);
+        const fallbackAnswer = buildFallbackAnswer(question, evidenceWithSanitizedLinks, null);
         response = {
           answer: fallbackAnswer,
-          evidence: evidenceWithUpdatedLinks,
-          citations: evidenceWithUpdatedLinks.map((item, index) => {
+          evidence: evidenceWithSanitizedLinks,
+          citations: evidenceWithSanitizedLinks.map((item, index) => {
             const offset = (pagination.page - 1) * pagination.pageSize;
             return { evidenceId: item.id, label: `[${offset + index + 1}]` };
           }),
@@ -892,7 +900,7 @@ async function updateLinksForHtmlContent(evidence: AgentEvidence[], services: Se
       
       return {
         ...item,
-        link: updatedLink,
+        link: sanitizeEvidenceLink(updatedLink),
         metadata: updatedMetadata
       };
     })
@@ -1254,7 +1262,7 @@ function convertLovdataSkillResultsToEvidence(hits: Array<{
       title: hit.title ?? hit.filename ?? 'Uten tittel',
       snippet: hit.snippet,
       date: hit.date ?? null,
-      link,
+      link: sanitizeEvidenceLink(link),
       metadata: {
         filename: hit.filename,
         member: hit.member
@@ -1331,7 +1339,7 @@ function convertSerperResultsToEvidence(organic: Array<{
     title: item.title ?? 'Uten tittel',
     snippet: item.snippet ?? null,
     date: item.date ?? null,
-    link: item.link! // Safe to use ! here because we filtered out null links
+    link: sanitizeEvidenceLink(item.link!) // Safe to use ! here because we filtered out null links
   }));
 }
 
@@ -1386,6 +1394,49 @@ function extractLovdataUrlFromXml(xmlContent: string | null | undefined): string
     logger.debug({ err: error }, 'extractLovdataUrlFromXml: error extracting URL');
     return null;
   }
+}
+
+/**
+ * Sanitizes evidence links to remove trailing ")." or similar malformed patterns
+ * Examples:
+ * - `https://lovdata.no/lov/2017-03-31-12).` -> `https://lovdata.no/lov/2017-03-31-12`
+ * - `https://example.com/doc").` -> `https://example.com/doc"`
+ * - `https://example.com/doc)` -> `https://example.com/doc`
+ */
+function sanitizeEvidenceLink(link: string | null | undefined): string | null {
+  if (!link) {
+    return null;
+  }
+
+  let sanitized = link.trim();
+
+  // Remove trailing ")." pattern (common issue where link extraction includes closing quote and period)
+  // Pattern: url")." or url)" where ) is before trailing punctuation
+  sanitized = sanitized.replace(/\)\s*\.?\s*"?\s*$/g, '');
+
+  // Remove trailing ")." pattern specifically (closing parenthesis, optional space, period, optional space, quote)
+  sanitized = sanitized.replace(/"?\s*\)\s*\.\s*"?\s*$/g, '');
+
+  // Remove trailing ) if it's not part of a balanced URL
+  // Only remove if URL doesn't have an opening ( that's not closed
+  if (sanitized.endsWith(')')) {
+    const openCount = (sanitized.match(/\(/g) || []).length;
+    const closeCount = (sanitized.match(/\)/g) || []).length;
+    // If there's an extra closing parenthesis at the end, remove it
+    if (closeCount > openCount) {
+      sanitized = sanitized.substring(0, sanitized.length - 1);
+    }
+  }
+
+  // Remove trailing periods and quotes that might be left over
+  sanitized = sanitized.replace(/\s*\.\s*"?\s*$/g, '').replace(/\s*"\s*$/g, '');
+
+  if (sanitized !== link) {
+    logger.debug({ original: link, sanitized }, 'sanitizeEvidenceLink: cleaned evidence link');
+  }
+
+  // Return null if empty, otherwise return the sanitized string
+  return sanitized.length > 0 ? sanitized : null;
 }
 
 /**
