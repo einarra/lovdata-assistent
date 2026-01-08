@@ -312,15 +312,29 @@ export async function runAssistant(options: AssistantRunOptions, _userContext?: 
                     }, 'runAssistant: evidence conversion result');
                     
                     // Add evidence immediately to ensure it's available in the response
-                    // Deduplicate evidence by (filename, member) to avoid duplicates
-                    const existingKeys = new Set(agentEvidence.map(e => `${e.metadata?.filename}:${e.metadata?.member}`));
+                    // Deduplicate evidence by (filename, member, title, snippet) to avoid true duplicates
+                    // Note: Same document can appear multiple times with different titles/snippets (different chunks/sections),
+                    // so we include all unique combinations to ensure complete evidence list
+                    // Only filter out exact duplicates (same filename, member, title, and snippet)
+                    const existingKeys = new Set(agentEvidence.map(e => {
+                      const title = e.title ?? '';
+                      const snippet = e.snippet ?? '';
+                      // Use first 100 chars of snippet to avoid issues with very long snippets
+                      const snippetKey = snippet.substring(0, 100);
+                      return `${e.metadata?.filename}:${e.metadata?.member}:${title}:${snippetKey}`;
+                    }));
                     const uniqueNewEvidence = newEvidence.filter(e => {
-                      const key = `${e.metadata?.filename}:${e.metadata?.member}`;
+                      const title = e.title ?? '';
+                      const snippet = e.snippet ?? '';
+                      const snippetKey = snippet.substring(0, 100);
+                      const key = `${e.metadata?.filename}:${e.metadata?.member}:${title}:${snippetKey}`;
                       if (existingKeys.has(key)) {
                         logger.debug({
                           key,
                           evidenceId: e.id,
-                          message: 'Skipping duplicate evidence'
+                          title: e.title,
+                          snippetPreview: snippet.substring(0, 50),
+                          message: 'Skipping exact duplicate evidence (same filename, member, title, and snippet)'
                         }, 'runAssistant: duplicate evidence filtered');
                         return false;
                       }
@@ -1128,9 +1142,16 @@ function buildEvidence(result: LovdataSkillSearchResult): AgentEvidence[] {
       title: hit.title ?? hit.filename ?? 'Uten tittel',
       snippet: hit.snippet,
       date: hit.date ?? null,
-      // Use URL from search result if available, otherwise build it
-      // The URL will be updated to HTML viewer URL from RAG system in updateLinksForHtmlContent
-      link: hit.url ?? buildXmlViewerUrl(hit.filename, hit.member),
+      // Use URL from search result if available (already has HTML viewer URL from lovdataSearch.ts)
+      // Otherwise build it with HTML extension (convert .xml to .html)
+      // The URL will be updated again in updateLinksForHtmlContent to ensure consistency
+      link: hit.url ?? (() => {
+        // Convert .xml member to .html for the viewer URL
+        const htmlMember = hit.member.toLowerCase().endsWith('.xml')
+          ? hit.member.replace(/\.xml$/i, '.html')
+          : hit.member;
+        return buildXmlViewerUrl(hit.filename, htmlMember);
+      })(),
       metadata: {
         filename: hit.filename,
         member: hit.member
@@ -1203,20 +1224,32 @@ function convertLovdataSkillResultsToEvidence(hits: Array<{
   snippet: string;
   url?: string | null; // Web link to document (optional, will be built if missing)
 }>): AgentEvidence[] {
-  return hits.map((hit, index) => ({
-    id: `lovdata-${index + 1}`,
-    source: 'lovdata',
-    title: hit.title ?? hit.filename ?? 'Uten tittel',
-    snippet: hit.snippet,
-    date: hit.date ?? null,
-      // Use URL from search result if available, otherwise build it
-      // The URL will be updated to HTML viewer URL from RAG system in updateLinksForHtmlContent
-      link: hit.url ?? buildXmlViewerUrl(hit.filename, hit.member),
-    metadata: {
-      filename: hit.filename,
-      member: hit.member
+  return hits.map((hit, index) => {
+    // Use URL from search result if available (already has HTML viewer URL from lovdataSearch.ts)
+    // Otherwise build it with HTML extension (convert .xml to .html)
+    // The URL will be updated again in updateLinksForHtmlContent to ensure consistency
+    let link = hit.url;
+    if (!link) {
+      // Convert .xml member to .html for the viewer URL
+      const htmlMember = hit.member.toLowerCase().endsWith('.xml')
+        ? hit.member.replace(/\.xml$/i, '.html')
+        : hit.member;
+      link = buildXmlViewerUrl(hit.filename, htmlMember);
     }
-  }));
+    
+    return {
+      id: `lovdata-${index + 1}`,
+      source: 'lovdata',
+      title: hit.title ?? hit.filename ?? 'Uten tittel',
+      snippet: hit.snippet,
+      date: hit.date ?? null,
+      link,
+      metadata: {
+        filename: hit.filename,
+        member: hit.member
+      }
+    };
+  });
 }
 
 // Helper function to convert serper skill results to evidence
